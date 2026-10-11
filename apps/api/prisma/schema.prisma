@@ -1,0 +1,1029 @@
+// ============================================================================
+//  Caballeros del Señor — Esquema de datos
+//
+//  Convenciones:
+//   - Todas las fechas/horas se guardan en UTC. La zona del negocio vive en
+//     ConfiguracionGlobal.zonaHoraria y se aplica solo al presentar.
+//   - El dinero usa Decimal(12,2). Nunca Float.
+//   - Las horas de agenda se guardan como minutos desde medianoche (480 = 8:00)
+//     para no arrastrar problemas de zona horaria en plantillas semanales.
+//   - Las tablas transaccionales guardan snapshot de precios y duraciones: si
+//     mañana cambia el precio de un servicio, el histórico no se altera.
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================ ENUMERACIONES =================================
+
+enum Rol {
+  ADMIN
+  RECEPCIONISTA
+  BARBERO
+  CONTADOR
+}
+
+enum EstadoReserva {
+  PENDIENTE /// creada desde la web, aún sin confirmar
+  CONFIRMADA
+  EN_CURSO /// el barbero ya está atendiendo
+  COMPLETADA /// atendido y cobrado → genera venta y sello
+  CANCELADA
+  NO_ASISTIO /// el cliente no llegó (no genera sello)
+}
+
+enum CanalReserva {
+  PANEL
+  WEB
+  WALK_IN
+}
+
+enum TipoBloqueAgenda {
+  ALMUERZO
+  DESCANSO
+  ADMINISTRATIVO
+}
+
+enum TipoExcepcionAgenda {
+  CERRADO /// día libre, vacaciones, cita médica
+  HORARIO_ESPECIAL /// trabaja, pero con horas distintas a su plantilla
+}
+
+enum TipoDiaEspecial {
+  FESTIVO_CERRADO
+  FESTIVO_ABIERTO
+  HORARIO_ESPECIAL
+}
+
+enum TipoMovimientoInventario {
+  ENTRADA /// compra a proveedor
+  SALIDA /// consumo interno / merma
+  VENTA
+  AJUSTE /// corrección de conteo físico
+  DEVOLUCION
+}
+
+enum TipoItemVenta {
+  SERVICIO
+  PRODUCTO
+}
+
+enum MetodoPago {
+  EFECTIVO
+  TARJETA
+  TRANSFERENCIA
+  NEQUI
+  DAVIPLATA
+  OTRO
+  CORTESIA /// canje de fidelidad
+}
+
+enum AlcanceComision {
+  USUARIO
+  SEDE
+  GLOBAL
+}
+
+enum CanalNotificacion {
+  WHATSAPP
+  EMAIL
+  SMS
+}
+
+enum EstadoNotificacion {
+  PENDIENTE
+  ENVIADA
+  FALLIDA
+  CANCELADA
+}
+
+enum NivelError {
+  WARN
+  ERROR
+  FATAL
+}
+
+enum AccionAuditoria {
+  CREAR
+  ACTUALIZAR
+  ELIMINAR
+  INICIAR_SESION
+  CERRAR_SESION
+  INICIO_SESION_FALLIDO
+  CAMBIAR_PASSWORD
+  RESTABLECER_PASSWORD
+  CANJEAR_FIDELIDAD
+  CANCELAR_RESERVA
+  REPROGRAMAR_RESERVA
+  COMPLETAR_RESERVA
+  ANULAR_VENTA
+  AJUSTAR_INVENTARIO
+  EXPORTAR_DATOS
+}
+
+// =============================== SEDES ======================================
+
+model Sede {
+  id        String  @id @default(uuid()) @db.Uuid
+  nombre    String  @db.VarChar(120)
+  slug      String  @unique @db.VarChar(140)
+  direccion String  @db.VarChar(255)
+  ciudad    String? @db.VarChar(120)
+  telefono  String? @db.VarChar(30)
+  mapsUrl   String? @db.VarChar(500)
+  notas     String? @db.Text
+  activa    Boolean @default(true)
+  orden     Int     @default(0)
+
+  horarios         SedeHorario[]
+  usuarios         Usuario[]
+  usuariosSede     UsuarioSede[]
+  reservas         Reserva[]
+  agendasDia       AgendaDia[]
+  excepciones      AgendaExcepcion[]
+  stocks           ProductoStock[]
+  movimientosInv   MovimientoInventario[]
+  ventas           Venta[]
+  configComisiones ConfigComision[]
+  diasEspeciales   DiaEspecial[]
+
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+  eliminadoEn   DateTime?
+
+  @@index([activa, orden])
+  @@map("sedes")
+}
+
+/// Horario de atención de la sede (el escaparate). No confundir con la agenda
+/// del barbero: una sede puede abrir 8–20 y un barbero trabajar solo 10–18.
+model SedeHorario {
+  id         String  @id @default(uuid()) @db.Uuid
+  sedeId     String  @db.Uuid
+  sede       Sede    @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+  /// 0 = domingo … 6 = sábado
+  diaSemana  Int     @db.SmallInt
+  horaInicio Int     @db.SmallInt
+  horaFin    Int     @db.SmallInt
+  cerrado    Boolean @default(false)
+
+  @@unique([sedeId, diaSemana])
+  @@map("sede_horarios")
+}
+
+// ============================== USUARIOS ====================================
+
+model Usuario {
+  id                  String  @id @default(uuid()) @db.Uuid
+  nombre              String  @db.VarChar(120)
+  apellido            String? @db.VarChar(120)
+  email               String  @unique @db.VarChar(180)
+  telefono            String  @db.VarChar(30)
+  passwordHash        String  @db.VarChar(255)
+  rol                 Rol
+  activo              Boolean @default(true)
+  debeCambiarPassword Boolean @default(false)
+
+  /// Sede donde atiende habitualmente (barbero / recepcionista)
+  sedeId String? @db.Uuid
+  sede   Sede?   @relation(fields: [sedeId], references: [id], onDelete: SetNull)
+
+  // --- Perfil público (solo relevante para barberos) ---
+  alias      String? @db.VarChar(60)
+  bio        String? @db.Text
+  fotoUrl    String? @db.VarChar(500)
+  visibleWeb Boolean @default(true)
+  /// Slot propio en minutos. Si es null hereda la configuración global.
+  slotMinutos Int?   @db.SmallInt
+
+  ultimoAccesoEn   DateTime?
+  intentosFallidos Int       @default(0)
+  bloqueadoHasta   DateTime?
+
+  sedesPermitidas     UsuarioSede[]
+  reservasComoBarbero Reserva[]              @relation("ReservaBarbero")
+  reservasCreadas     Reserva[]              @relation("ReservaCreador")
+  agendasDia          AgendaDia[]
+  excepciones         AgendaExcepcion[]
+  sesiones            Sesion[]
+  tokensRecuperacion  TokenRecuperacion[]
+  auditorias          Auditoria[]
+  errores             RegistroError[]
+  movimientosInv      MovimientoInventario[]
+  ventasComoBarbero   Venta[]                @relation("VentaBarbero")
+  ventasRegistradas   Venta[]                @relation("VentaRegistrador")
+  configComisiones    ConfigComision[]       @relation("ComisionUsuario")
+  comisionesCreadas   ConfigComision[]       @relation("ComisionCreador")
+  canjesAutorizados   CanjeFidelidad[]
+
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+  eliminadoEn   DateTime?
+
+  @@index([rol, activo])
+  @@index([sedeId, activo])
+  @@map("usuarios")
+}
+
+/// Un barbero puede estar habilitado en varias sedes (cubre turnos).
+/// Usuario.sedeId es su sede principal; esta tabla son las permitidas.
+model UsuarioSede {
+  usuarioId String   @db.Uuid
+  usuario   Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  sedeId    String   @db.Uuid
+  sede      Sede     @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+  creadoEn  DateTime @default(now())
+
+  @@id([usuarioId, sedeId])
+  @@map("usuario_sedes")
+}
+
+/// Sesión de refresh token. Permite cerrar sesión en un dispositivo concreto y
+/// detectar reutilización de tokens robados (rotación con detección: si llega
+/// un token ya rotado, se revoca toda la familia).
+model Sesion {
+  id           String    @id @default(uuid()) @db.Uuid
+  usuarioId    String    @db.Uuid
+  usuario      Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  /// SHA-256 del refresh token. Nunca se guarda el token en claro.
+  tokenHash    String    @unique @db.VarChar(64)
+  familiaId    String    @db.Uuid
+  expiraEn     DateTime
+  revocadaEn   DateTime?
+  motivoRevoca String?   @db.VarChar(120)
+  ip           String?   @db.VarChar(64)
+  userAgent    String?   @db.VarChar(300)
+  creadoEn     DateTime  @default(now())
+
+  @@index([usuarioId, revocadaEn])
+  @@index([familiaId])
+  @@index([expiraEn])
+  @@map("sesiones")
+}
+
+model TokenRecuperacion {
+  id         String    @id @default(uuid()) @db.Uuid
+  usuarioId  String    @db.Uuid
+  usuario    Usuario   @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  /// SHA-256 del código de 6 dígitos enviado por Brevo
+  codigoHash String    @db.VarChar(64)
+  expiraEn   DateTime
+  usadoEn    DateTime?
+  intentos   Int       @default(0)
+  ip         String?   @db.VarChar(64)
+  creadoEn   DateTime  @default(now())
+
+  @@index([usuarioId, usadoEn])
+  @@index([expiraEn])
+  @@map("tokens_recuperacion")
+}
+
+// ============================== CLIENTES ====================================
+
+model Cliente {
+  id             String    @id @default(uuid()) @db.Uuid
+  nombreCompleto String    @db.VarChar(160)
+  /// Normalizado a E.164 (+57…). Es la llave natural del cliente.
+  telefono       String    @unique @db.VarChar(20)
+  /// Preparados para el futuro: opcionales y ocultos en el formulario actual.
+  email           String?   @db.VarChar(180)
+  documento       String?   @db.VarChar(30)
+  fechaNacimiento DateTime? @db.Date
+  /// Preferencias: "degradado bajo, no tocar el copete"
+  notas          String?   @db.Text
+  /// true para el "Consumidor final" genérico de walk-ins no registrados
+  esGenerico     Boolean   @default(false)
+  activo         Boolean   @default(true)
+  aceptaWhatsapp Boolean   @default(true)
+  aceptaEmail    Boolean   @default(false)
+
+  // --- Métricas desnormalizadas (se recalculan al completar una reserva) ---
+  totalVisitas        Int       @default(0)
+  totalGastado        Decimal   @default(0) @db.Decimal(12, 2)
+  primeraVisitaEn     DateTime?
+  ultimaVisitaEn      DateTime?
+  /// Promedio de días entre visitas: con esto se predice el próximo regreso
+  promedioDiasRegreso Int?      @db.SmallInt
+  regresoEstimadoEn   DateTime?
+  totalCancelaciones  Int       @default(0)
+  totalNoAsistio      Int       @default(0)
+
+  reservas       Reserva[]
+  sellos         SelloFidelidad[]
+  canjes         CanjeFidelidad[]
+  ventas         Venta[]
+  notificaciones Notificacion[]
+
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+  eliminadoEn   DateTime?
+
+  @@index([activo, ultimaVisitaEn])
+  @@index([regresoEstimadoEn])
+  @@map("clientes")
+}
+
+// ============================== SERVICIOS ===================================
+
+model Servicio {
+  id          String   @id @default(uuid()) @db.Uuid
+  nombre      String   @db.VarChar(140)
+  slug        String   @unique @db.VarChar(160)
+  descripcion String?  @db.Text
+  /// Qué incluye: ["Lavado", "Perfilado de barba"]. Opcional.
+  incluye     String[] @default([])
+  precio      Decimal  @db.Decimal(12, 2)
+  duracionMinutos Int  @db.SmallInt
+  /// Minutos extra de limpieza/preparación. Bloquean la agenda pero no se
+  /// muestran al cliente. Si es null hereda el buffer global.
+  bufferMinutos   Int? @db.SmallInt
+  /// Color para el calendario del panel (#RRGGBB)
+  color       String?  @db.VarChar(9)
+  activo      Boolean  @default(true)
+  visibleWeb  Boolean  @default(true)
+  orden       Int      @default(0)
+  /// Si acumula sellos del programa de fidelidad
+  cuentaFidelidad    Boolean @default(true)
+  /// Si puede pagarse con un canje (el "8vo corte gratis")
+  canjeableFidelidad Boolean @default(true)
+
+  reservas   ReservaServicio[]
+  comisiones ConfigComision[]
+
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+  eliminadoEn   DateTime?
+
+  @@index([activo, orden])
+  @@map("servicios")
+}
+
+// ============================== RESERVAS ====================================
+
+model Reserva {
+  id     String @id @default(uuid()) @db.Uuid
+  /// Código corto legible para el cliente: CDS-7F3K2M
+  codigo String @unique @db.VarChar(20)
+
+  clienteId String?  @db.Uuid
+  cliente   Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+
+  sedeId String @db.Uuid
+  sede   Sede   @relation(fields: [sedeId], references: [id])
+
+  barberoId String  @db.Uuid
+  barbero   Usuario @relation("ReservaBarbero", fields: [barberoId], references: [id])
+
+  /// Usuario del panel que la registró. Null si la creó el cliente en la web.
+  creadoPorId String?  @db.Uuid
+  creadoPor   Usuario? @relation("ReservaCreador", fields: [creadoPorId], references: [id], onDelete: SetNull)
+
+  estado EstadoReserva @default(CONFIRMADA)
+  canal  CanalReserva  @default(PANEL)
+
+  inicioEn DateTime
+  /// Fin visible para el cliente: inicioEn + suma de duraciones
+  finEn    DateTime
+  /// Fin real que bloquea la agenda (finEn + buffer). Es el que se usa para
+  /// detectar solapamientos.
+  finConBufferEn DateTime
+
+  duracionMinutos Int @db.SmallInt
+  bufferMinutos   Int @default(0) @db.SmallInt
+
+  subtotal  Decimal @db.Decimal(12, 2)
+  descuento Decimal @default(0) @db.Decimal(12, 2)
+  total     Decimal @db.Decimal(12, 2)
+
+  /// Lo que pidió el cliente ("como la última vez, más corto")
+  notaCliente String? @db.Text
+  /// Nota interna del barbero/recepción, invisible para el cliente
+  notaInterna String? @db.Text
+
+  /// Orden de llegada para walk-ins del día (1, 2, 3…). Null si tiene hora.
+  turnoWalkIn Int? @db.SmallInt
+
+  /// Contacto cuando se registra sin crear ficha de cliente
+  nombreContacto   String? @db.VarChar(160)
+  telefonoContacto String? @db.VarChar(20)
+
+  // --- Trazabilidad de estados ---
+  confirmadaEn      DateTime?
+  iniciadaEn        DateTime?
+  completadaEn      DateTime?
+  canceladaEn       DateTime?
+  canceladaPor      String?   @db.VarChar(20) /// CLIENTE | PANEL | SISTEMA
+  motivoCancelacion String?   @db.Text
+
+  reprogramadaDeId String?   @db.Uuid
+  reprogramadaDe   Reserva?  @relation("Reprogramacion", fields: [reprogramadaDeId], references: [id], onDelete: SetNull)
+  reprogramaciones Reserva[] @relation("Reprogramacion")
+
+  /// Token opaco para que el cliente gestione su reserva sin iniciar sesión
+  tokenGestion String? @unique @db.VarChar(64)
+
+  servicios      ReservaServicio[]
+  sello          SelloFidelidad?
+  canje          CanjeFidelidad?
+  venta          Venta?
+  notificaciones Notificacion[]
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  @@index([barberoId, inicioEn])
+  @@index([sedeId, inicioEn])
+  @@index([clienteId, inicioEn])
+  @@index([estado, inicioEn])
+  @@index([inicioEn])
+  @@map("reservas")
+}
+
+/// Servicios de una reserva con precio y duración congelados al reservar.
+model ReservaServicio {
+  id         String   @id @default(uuid()) @db.Uuid
+  reservaId  String   @db.Uuid
+  reserva    Reserva  @relation(fields: [reservaId], references: [id], onDelete: Cascade)
+  servicioId String   @db.Uuid
+  servicio   Servicio @relation(fields: [servicioId], references: [id])
+
+  nombreSnapshot   String  @db.VarChar(140)
+  precioSnapshot   Decimal @db.Decimal(12, 2)
+  duracionSnapshot Int     @db.SmallInt
+  /// true si este servicio se pagó con el canje de fidelidad
+  cubiertoPorCanje Boolean @default(false)
+  orden            Int     @default(0)
+
+  @@unique([reservaId, servicioId])
+  @@index([servicioId])
+  @@map("reserva_servicios")
+}
+
+// ====================== AGENDA / CRONOGRAMA =================================
+
+/// Plantilla semanal de trabajo de un barbero en una sede.
+model AgendaDia {
+  id        String  @id @default(uuid()) @db.Uuid
+  usuarioId String  @db.Uuid
+  usuario   Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  sedeId    String  @db.Uuid
+  sede      Sede    @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+
+  /// 0 = domingo … 6 = sábado
+  diaSemana  Int @db.SmallInt
+  horaInicio Int @db.SmallInt
+  horaFin    Int @db.SmallInt
+  /// Slot de este día. Si es null → Usuario.slotMinutos → configuración global
+  slotMinutos Int?    @db.SmallInt
+  trabaja     Boolean @default(true)
+
+  bloques AgendaBloque[]
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  @@unique([usuarioId, sedeId, diaSemana])
+  @@index([sedeId, diaSemana])
+  @@map("agenda_dias")
+}
+
+/// Cortes dentro de la jornada: almuerzo, descanso, tiempo administrativo.
+model AgendaBloque {
+  id          String           @id @default(uuid()) @db.Uuid
+  agendaDiaId String           @db.Uuid
+  agendaDia   AgendaDia        @relation(fields: [agendaDiaId], references: [id], onDelete: Cascade)
+  tipo        TipoBloqueAgenda @default(ALMUERZO)
+  horaInicio  Int              @db.SmallInt
+  horaFin     Int              @db.SmallInt
+  etiqueta    String?          @db.VarChar(80)
+
+  @@index([agendaDiaId])
+  @@map("agenda_bloques")
+}
+
+/// Excepción puntual para una fecha concreta: día libre, cita médica,
+/// vacaciones o un horario distinto al de la plantilla.
+model AgendaExcepcion {
+  id        String  @id @default(uuid()) @db.Uuid
+  usuarioId String  @db.Uuid
+  usuario   Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  /// Null = aplica en todas las sedes del barbero
+  sedeId    String? @db.Uuid
+  sede      Sede?   @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+
+  fecha      DateTime            @db.Date
+  tipo       TipoExcepcionAgenda
+  /// Solo para HORARIO_ESPECIAL
+  horaInicio Int?                @db.SmallInt
+  horaFin    Int?                @db.SmallInt
+  motivo     String?             @db.VarChar(200)
+
+  creadoEn DateTime @default(now())
+
+  @@unique([usuarioId, fecha, sedeId])
+  @@index([fecha])
+  @@map("agenda_excepciones")
+}
+
+// ====================== CONFIGURACIÓN GLOBAL ================================
+
+/// Fila única (id = 1). Valores por defecto del negocio.
+model ConfiguracionGlobal {
+  id Int @id @default(1)
+
+  nombreNegocio    String  @default("Caballeros del Señor") @db.VarChar(140)
+  zonaHoraria      String  @default("America/Bogota") @db.VarChar(60)
+  moneda           String  @default("COP") @db.VarChar(3)
+  logoUrl          String? @db.VarChar(500)
+  telefonoContacto String? @db.VarChar(30)
+  emailContacto    String? @db.VarChar(180)
+
+  /// Slot por defecto cuando el barbero no configuró el suyo
+  slotMinutosDefault   Int @default(30) @db.SmallInt
+  /// Minutos de limpieza entre clientes. Internos: el cliente no los ve.
+  bufferMinutosDefault Int @default(0) @db.SmallInt
+
+  /// Antelación mínima para reservar desde la web (minutos)
+  minAntelacionMinutos      Int     @default(60)
+  maxDiasAnticipacion       Int     @default(45)
+  horasLimiteCancelacion    Int     @default(4) @db.SmallInt
+  horasLimiteReprogramacion Int     @default(4) @db.SmallInt
+  permiteElegirBarbero      Boolean @default(true)
+  /// Las reservas de la web entran como PENDIENTE
+  requiereConfirmacion      Boolean @default(false)
+  maxReservasActivasCliente Int     @default(2) @db.SmallInt
+
+  // --- Recordatorios ---
+  recordatorioWhatsappHoras Int     @default(24) @db.SmallInt
+  recordatorioEmailHoras    Int     @default(24) @db.SmallInt
+  notificarNuevaReserva     Boolean @default(true)
+  notificarCancelacion      Boolean @default(true)
+
+  actualizadoEn    DateTime @updatedAt
+  actualizadoPorId String?  @db.Uuid
+
+  @@map("configuracion_global")
+}
+
+/// Festivos y fechas especiales. Si sedeId es null aplica a todas las sedes.
+model DiaEspecial {
+  id     String  @id @default(uuid()) @db.Uuid
+  sedeId String? @db.Uuid
+  sede   Sede?   @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+
+  fecha      DateTime        @db.Date
+  nombre     String          @db.VarChar(140)
+  tipo       TipoDiaEspecial
+  /// Solo para FESTIVO_ABIERTO / HORARIO_ESPECIAL
+  horaInicio Int?            @db.SmallInt
+  horaFin    Int?            @db.SmallInt
+  visibleWeb Boolean         @default(true)
+  notas      String?         @db.Text
+
+  creadoEn DateTime @default(now())
+
+  @@unique([fecha, sedeId])
+  @@index([fecha])
+  @@map("dias_especiales")
+}
+
+// ============================ FIDELIDAD =====================================
+
+/// Configuración del programa de sellos. Fila única (id = 1).
+model ProgramaFidelidad {
+  id     Int     @id @default(1)
+  activo Boolean @default(true)
+  nombre String  @default("Tarjeta de cortes") @db.VarChar(140)
+  /// Sellos necesarios para ganar un premio. 7 sellos → el 8vo es gratis.
+  sellosRequeridos  Int     @default(7) @db.SmallInt
+  /// Días de validez de un sello. Null = no caducan.
+  diasValidezSello  Int?
+  /// Días de validez de un premio ya ganado. Null = no caduca.
+  diasValidezPremio Int?
+  /// Si un servicio gratis genera a su vez un sello (normalmente no)
+  canjeGeneraSello  Boolean @default(false)
+  /// Solo los sellos de la misma sede cuentan para el premio
+  acumulaPorSede    Boolean @default(false)
+  mensajePremio     String  @default("¡Felicidades! Tu próximo corte es gratis") @db.VarChar(255)
+
+  actualizadoEn DateTime @updatedAt
+
+  @@map("programa_fidelidad")
+}
+
+/// Un sello por reserva COMPLETADA que incluya servicios que cuenten.
+/// Es la fuente de verdad: el contador del cliente se deriva de aquí.
+model SelloFidelidad {
+  id        String  @id @default(uuid()) @db.Uuid
+  clienteId String  @db.Uuid
+  cliente   Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  /// Un sello por reserva, nunca dos
+  reservaId String  @unique @db.Uuid
+  reserva   Reserva @relation(fields: [reservaId], references: [id], onDelete: Cascade)
+  sedeId    String? @db.Uuid
+
+  /// Se rellena cuando el sello se consume al canjear un premio
+  canjeId  String?         @db.Uuid
+  canje    CanjeFidelidad? @relation(fields: [canjeId], references: [id], onDelete: SetNull)
+  caducaEn DateTime?
+
+  creadoEn DateTime @default(now())
+
+  @@index([clienteId, canjeId])
+  @@index([caducaEn])
+  @@map("sellos_fidelidad")
+}
+
+/// Premio entregado. Deja constancia de quién lo autorizó.
+model CanjeFidelidad {
+  id        String  @id @default(uuid()) @db.Uuid
+  clienteId String  @db.Uuid
+  cliente   Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  /// Reserva en la que se aplicó el premio
+  reservaId String?  @unique @db.Uuid
+  reserva   Reserva? @relation(fields: [reservaId], references: [id], onDelete: SetNull)
+
+  autorizadoPorId String?  @db.Uuid
+  autorizadoPor   Usuario? @relation(fields: [autorizadoPorId], references: [id], onDelete: SetNull)
+
+  sellosConsumidos Int     @db.SmallInt
+  valorCubierto    Decimal @db.Decimal(12, 2)
+  notas            String? @db.Text
+
+  sellos   SelloFidelidad[]
+  creadoEn DateTime         @default(now())
+
+  @@index([clienteId, creadoEn])
+  @@map("canjes_fidelidad")
+}
+
+// ============================ INVENTARIO ====================================
+
+model CategoriaProducto {
+  id     String  @id @default(uuid()) @db.Uuid
+  nombre String  @unique @db.VarChar(120)
+  slug   String  @unique @db.VarChar(140)
+  activa Boolean @default(true)
+  orden  Int     @default(0)
+
+  productos Producto[]
+
+  @@map("categorias_producto")
+}
+
+model Producto {
+  id           String  @id @default(uuid()) @db.Uuid
+  sku          String? @unique @db.VarChar(60)
+  codigoBarras String? @unique @db.VarChar(60)
+  nombre       String  @db.VarChar(160)
+  descripcion  String? @db.Text
+  marca        String? @db.VarChar(120)
+
+  categoriaId String?            @db.Uuid
+  categoria   CategoriaProducto? @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+
+  /// Costo de la última compra. Sirve para margen y para el contador.
+  costoUnitario Decimal @default(0) @db.Decimal(12, 2)
+  /// Precio al público. 0 si es solo de consumo interno.
+  precioVenta   Decimal @default(0) @db.Decimal(12, 2)
+  unidadMedida  String  @default("UNIDAD") @db.VarChar(20)
+  /// Si se vende al cliente o es insumo de la barbería
+  esVendible    Boolean @default(true)
+  /// Avisar cuando el stock baje de aquí
+  stockMinimo   Int     @default(0)
+  activo        Boolean @default(true)
+  imagenUrl     String? @db.VarChar(500)
+
+  stocks      ProductoStock[]
+  movimientos MovimientoInventario[]
+  proveedorId String?                @db.Uuid
+  proveedor   Proveedor?             @relation(fields: [proveedorId], references: [id], onDelete: SetNull)
+
+  creadoEn      DateTime  @default(now())
+  actualizadoEn DateTime  @updatedAt
+  eliminadoEn   DateTime?
+
+  @@index([activo, nombre])
+  @@index([categoriaId])
+  @@map("productos")
+}
+
+model Proveedor {
+  id       String  @id @default(uuid()) @db.Uuid
+  nombre   String  @db.VarChar(160)
+  nit      String? @db.VarChar(40)
+  telefono String? @db.VarChar(30)
+  email    String? @db.VarChar(180)
+  notas    String? @db.Text
+  activo   Boolean @default(true)
+
+  productos   Producto[]
+  movimientos MovimientoInventario[]
+
+  creadoEn DateTime @default(now())
+
+  @@map("proveedores")
+}
+
+/// Stock por sede: el inventario no es global, cada sede tiene el suyo.
+model ProductoStock {
+  productoId    String   @db.Uuid
+  producto      Producto @relation(fields: [productoId], references: [id], onDelete: Cascade)
+  sedeId        String   @db.Uuid
+  sede          Sede     @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+  cantidad      Int      @default(0)
+  actualizadoEn DateTime @updatedAt
+
+  @@id([productoId, sedeId])
+  @@index([sedeId, cantidad])
+  @@map("producto_stock")
+}
+
+/// Libro de movimientos: inmutable. Para corregir se crea un AJUSTE, nunca se
+/// edita un movimiento pasado. Es lo que el contador audita.
+model MovimientoInventario {
+  id         String   @id @default(uuid()) @db.Uuid
+  productoId String   @db.Uuid
+  producto   Producto @relation(fields: [productoId], references: [id])
+  sedeId     String   @db.Uuid
+  sede       Sede     @relation(fields: [sedeId], references: [id])
+
+  tipo TipoMovimientoInventario
+  /// Siempre positiva. El signo lo determina el tipo.
+  cantidad Int
+  /// Stock resultante tras aplicar el movimiento (auditar sin recalcular)
+  stockResultante Int
+
+  costoUnitario  Decimal? @db.Decimal(12, 2)
+  precioUnitario Decimal? @db.Decimal(12, 2)
+  total          Decimal? @db.Decimal(12, 2)
+
+  proveedorId String?    @db.Uuid
+  proveedor   Proveedor? @relation(fields: [proveedorId], references: [id], onDelete: SetNull)
+
+  /// Número de factura de compra, remisión, etc.
+  documento String? @db.VarChar(80)
+  motivo    String? @db.Text
+
+  /// Si el movimiento vino de una venta
+  ventaItemId String?    @db.Uuid
+  ventaItem   VentaItem? @relation(fields: [ventaItemId], references: [id], onDelete: SetNull)
+
+  registradoPorId String?  @db.Uuid
+  registradoPor   Usuario? @relation(fields: [registradoPorId], references: [id], onDelete: SetNull)
+
+  fecha    DateTime @default(now())
+  creadoEn DateTime @default(now())
+
+  @@index([productoId, fecha])
+  @@index([sedeId, fecha])
+  @@index([tipo, fecha])
+  @@map("movimientos_inventario")
+}
+
+// =========================== VENTAS / CAJA ==================================
+
+/// Toda entrada de dinero pasa por aquí: servicios y productos.
+/// Es la tabla que alimenta el módulo del contador.
+model Venta {
+  id     String @id @default(uuid()) @db.Uuid
+  /// Consecutivo legible: V-2026-000123
+  numero String @unique @db.VarChar(24)
+
+  sedeId String @db.Uuid
+  sede   Sede   @relation(fields: [sedeId], references: [id])
+
+  /// Barbero al que se atribuye la venta (para comisiones)
+  barberoId String?  @db.Uuid
+  barbero   Usuario? @relation("VentaBarbero", fields: [barberoId], references: [id], onDelete: SetNull)
+
+  clienteId String?  @db.Uuid
+  cliente   Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+
+  /// Venta originada al completar una reserva
+  reservaId String?  @unique @db.Uuid
+  reserva   Reserva? @relation(fields: [reservaId], references: [id], onDelete: SetNull)
+
+  subtotal  Decimal @db.Decimal(12, 2)
+  descuento Decimal @default(0) @db.Decimal(12, 2)
+  impuestos Decimal @default(0) @db.Decimal(12, 2)
+  total     Decimal @db.Decimal(12, 2)
+  /// Parte cubierta por un canje de fidelidad (no es ingreso real)
+  totalCortesia Decimal @default(0) @db.Decimal(12, 2)
+
+  metodoPago MetodoPago @default(EFECTIVO)
+  /// Comisión calculada y congelada al cerrar la venta
+  comisionBarbero    Decimal @default(0) @db.Decimal(12, 2)
+  porcentajeComision Decimal @default(0) @db.Decimal(5, 2)
+
+  notas           String?   @db.Text
+  anuladaEn       DateTime?
+  motivoAnulacion String?   @db.Text
+
+  registradoPorId String?  @db.Uuid
+  registradoPor   Usuario? @relation("VentaRegistrador", fields: [registradoPorId], references: [id], onDelete: SetNull)
+
+  items VentaItem[]
+
+  fecha         DateTime @default(now())
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  @@index([sedeId, fecha])
+  @@index([barberoId, fecha])
+  @@index([fecha])
+  @@map("ventas")
+}
+
+model VentaItem {
+  id      String @id @default(uuid()) @db.Uuid
+  ventaId String @db.Uuid
+  venta   Venta  @relation(fields: [ventaId], references: [id], onDelete: Cascade)
+
+  tipo TipoItemVenta
+  /// Id del servicio o producto. Sin FK: el item sobrevive al borrado.
+  referenciaId String? @db.Uuid
+  nombre       String  @db.VarChar(160)
+
+  cantidad       Int     @default(1)
+  precioUnitario Decimal @db.Decimal(12, 2)
+  descuento      Decimal @default(0) @db.Decimal(12, 2)
+  subtotal       Decimal @db.Decimal(12, 2)
+  /// Costo al momento de vender: permite calcular margen real
+  costoUnitario  Decimal? @db.Decimal(12, 2)
+  esCortesia     Boolean  @default(false)
+
+  movimientos MovimientoInventario[]
+
+  @@index([ventaId])
+  @@index([tipo, referenciaId])
+  @@map("venta_items")
+}
+
+/// Porcentaje de comisión con vigencia. Nunca se edita: se cierra el periodo
+/// anterior y se crea uno nuevo, para que los cierres pasados no cambien.
+model ConfigComision {
+  id      String          @id @default(uuid()) @db.Uuid
+  alcance AlcanceComision
+
+  usuarioId String?  @db.Uuid
+  usuario   Usuario? @relation("ComisionUsuario", fields: [usuarioId], references: [id], onDelete: Cascade)
+  sedeId    String?  @db.Uuid
+  sede      Sede?    @relation(fields: [sedeId], references: [id], onDelete: Cascade)
+  /// Comisión distinta para un servicio concreto (opcional)
+  servicioId String?   @db.Uuid
+  servicio   Servicio? @relation(fields: [servicioId], references: [id], onDelete: Cascade)
+
+  porcentaje Decimal  @db.Decimal(5, 2)
+  /// Si también comisiona la venta de productos
+  porcentajeProducto Decimal? @db.Decimal(5, 2)
+
+  vigenteDesde DateTime  @db.Date
+  vigenteHasta DateTime? @db.Date
+  notas        String?   @db.Text
+
+  creadoPorId String?  @db.Uuid
+  creadoPor   Usuario? @relation("ComisionCreador", fields: [creadoPorId], references: [id], onDelete: SetNull)
+  creadoEn    DateTime @default(now())
+
+  @@index([alcance, vigenteDesde])
+  @@index([usuarioId, vigenteDesde])
+  @@map("config_comisiones")
+}
+
+// ========================= NOTIFICACIONES ===================================
+
+model PlantillaNotificacion {
+  id    String            @id @default(uuid()) @db.Uuid
+  /// Identificador estable usado en el código: reserva.confirmada
+  clave String            @unique @db.VarChar(80)
+  canal CanalNotificacion
+  nombre String           @db.VarChar(140)
+  asunto String?          @db.VarChar(200)
+  /// Cuerpo con placeholders {{cliente}}, {{fecha}}, {{barbero}}
+  cuerpo String           @db.Text
+  /// Nombre de la plantilla aprobada en Meta (WhatsApp)
+  plantillaMeta  String?  @db.VarChar(140)
+  /// Id de plantilla en Brevo
+  plantillaBrevo Int?
+  activa         Boolean  @default(true)
+
+  notificaciones Notificacion[]
+
+  creadoEn      DateTime @default(now())
+  actualizadoEn DateTime @updatedAt
+
+  @@map("plantillas_notificacion")
+}
+
+model Notificacion {
+  id          String                 @id @default(uuid()) @db.Uuid
+  canal       CanalNotificacion
+  plantillaId String?                @db.Uuid
+  plantilla   PlantillaNotificacion? @relation(fields: [plantillaId], references: [id], onDelete: SetNull)
+
+  /// Teléfono E.164 o correo
+  destino String @db.VarChar(180)
+
+  clienteId String?  @db.Uuid
+  cliente   Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  reservaId String?  @db.Uuid
+  reserva   Reserva? @relation(fields: [reservaId], references: [id], onDelete: SetNull)
+
+  estado  EstadoNotificacion @default(PENDIENTE)
+  /// Variables resueltas que se enviaron
+  payload Json?
+  /// Id del mensaje devuelto por Meta/Brevo, para rastrear entregas
+  idExterno String? @db.VarChar(140)
+  error     String? @db.Text
+  intentos  Int     @default(0)
+
+  programadaPara DateTime?
+  enviadaEn      DateTime?
+  entregadaEn    DateTime?
+  leidaEn        DateTime?
+
+  creadoEn DateTime @default(now())
+
+  @@index([estado, programadaPara])
+  @@index([reservaId])
+  @@index([idExterno])
+  @@map("notificaciones")
+}
+
+// ======================= AUDITORÍA Y ERRORES ================================
+
+/// Quién hizo qué, cuándo y desde dónde. Solo inserciones.
+model Auditoria {
+  id        String          @id @default(uuid()) @db.Uuid
+  accion    AccionAuditoria
+  /// Nombre del modelo afectado: Reserva, Cliente, Usuario…
+  entidad   String          @db.VarChar(60)
+  entidadId String?         @db.VarChar(64)
+
+  usuarioId String?  @db.Uuid
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  /// Copia del nombre y rol: el log sobrevive al borrado del usuario
+  usuarioNombre String? @db.VarChar(160)
+  usuarioRol    String? @db.VarChar(30)
+
+  /// Estado anterior y posterior. Los campos sensibles se omiten.
+  antes   Json?
+  despues Json?
+  /// Resumen legible: "Reserva CDS-7F3K2M movida del 12/10 10:00 al 13/10 11:30"
+  resumen String? @db.VarChar(500)
+
+  ip        String? @db.VarChar(64)
+  userAgent String? @db.VarChar(300)
+  /// Id de correlación de la petición HTTP
+  requestId String? @db.VarChar(40)
+
+  creadoEn DateTime @default(now())
+
+  @@index([entidad, entidadId])
+  @@index([usuarioId, creadoEn])
+  @@index([creadoEn])
+  @@index([accion, creadoEn])
+  @@map("auditoria")
+}
+
+model RegistroError {
+  id      String     @id @default(uuid()) @db.Uuid
+  nivel   NivelError @default(ERROR)
+  /// Código interno: RESERVA_SOLAPADA, STOCK_INSUFICIENTE…
+  codigo  String     @db.VarChar(80)
+  mensaje String     @db.Text
+  stack   String?    @db.Text
+  /// Agrupa errores idénticos para no llenar la tabla de ruido
+  huella      String? @db.VarChar(64)
+  ocurrencias Int     @default(1)
+
+  /// panel | booking | api | worker
+  origen     String? @db.VarChar(20)
+  ruta       String? @db.VarChar(300)
+  metodo     String? @db.VarChar(10)
+  statusHttp Int?    @db.SmallInt
+  contexto   Json?
+
+  usuarioId String?  @db.Uuid
+  usuario   Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  requestId String?  @db.VarChar(40)
+  ip        String?  @db.VarChar(64)
+
+  resueltoEn DateTime?
+  notas      String?   @db.Text
+
+  primeraVezEn DateTime @default(now())
+  ultimaVezEn  DateTime @default(now())
+
+  @@index([nivel, ultimaVezEn])
+  @@index([huella])
+  @@index([resueltoEn])
+  @@map("registro_errores")
+}
