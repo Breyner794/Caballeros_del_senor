@@ -142,3 +142,21 @@ export const rangoFechasSchema = z
     message: 'La fecha inicial no puede ser posterior a la final',
     path: ['desde'],
   });
+
+/**
+ * Arreglo que llega por query string.
+ *
+ * `?ids=a&ids=b` llega como arreglo, pero `?ids=a` llega como texto suelto, y
+ * `?ids=a,b` como una sola cadena. Los tres casos son peticiones legítimas que
+ * el frontend genera sin pensarlo, así que se normalizan aquí en lugar de
+ * obligar a cada pantalla a recordar la diferencia.
+ */
+export const arrayDeQuery = <T extends z.ZodTypeAny>(elemento: T) =>
+  z.preprocess((valor) => {
+    if (valor === undefined || valor === null || valor === '') return [];
+    if (Array.isArray(valor)) return valor;
+    if (typeof valor === 'string') {
+      return valor.includes(',') ? valor.split(',').map((v) => v.trim()).filter(Boolean) : [valor];
+    }
+    return [valor];
+  }, z.array(elemento));

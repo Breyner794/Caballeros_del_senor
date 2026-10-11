@@ -120,11 +120,11 @@ export class FiltroGlobalExcepciones implements ExceptionFilter {
       };
     }
 
-    // 3. Restricciones de la base de datos.
-    if (excepcion instanceof Prisma.PrismaClientKnownRequestError) {
-      const traducido = this.traducirPrisma(excepcion);
-      if (traducido) return traducido;
-    }
+    // 3. Restricciones de la base de datos. Se intenta siempre, no solo con
+    //    los errores "Known" de Prisma: las restricciones de exclusión llegan
+    //    como "Unknown", con el error crudo de Postgres dentro del mensaje.
+    const deBaseDatos = this.traducirPrisma(excepcion);
+    if (deBaseDatos) return deBaseDatos;
 
     // 4. Excepciones HTTP de Nest (404 de ruta, 401 del guard, throttler…).
     if (excepcion instanceof HttpException) {
@@ -157,7 +157,7 @@ export class FiltroGlobalExcepciones implements ExceptionFilter {
     };
   }
 
-  private traducirPrisma(error: Prisma.PrismaClientKnownRequestError): {
+  private traducirPrisma(error: unknown): {
     status: number;
     codigo: string;
     mensaje: string;
@@ -201,6 +201,8 @@ export class FiltroGlobalExcepciones implements ExceptionFilter {
         registrar: false,
       };
     }
+
+    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return null;
 
     switch (error.code) {
       case 'P2002': {

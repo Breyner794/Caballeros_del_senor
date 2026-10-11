@@ -12,6 +12,14 @@ import { FiltroGlobalExcepciones } from './comun/excepciones/filtro-global.js';
 import { GuardAutenticacion, GuardPermisos } from './comun/autenticacion/guards.js';
 import { AutenticacionModule } from './modulos/autenticacion/autenticacion.module.js';
 import { NotificacionesModule } from './modulos/notificaciones/notificaciones.module.js';
+import { SedesModule } from './modulos/sedes/sedes.module.js';
+import { ServiciosModule } from './modulos/servicios/servicios.module.js';
+import { ClientesModule } from './modulos/clientes/clientes.module.js';
+import { FidelidadModule } from './modulos/fidelidad/fidelidad.module.js';
+import { DisponibilidadModule } from './modulos/disponibilidad/disponibilidad.module.js';
+import { AgendaModule } from './modulos/agenda/agenda.module.js';
+import { VentasModule } from './modulos/ventas/ventas.module.js';
+import { ReservasModule } from './modulos/reservas/reservas.module.js';
 import { SaludController } from './comun/salud/salud.controller.js';
 
 @Module({
@@ -44,6 +52,14 @@ import { SaludController } from './comun/salud/salud.controller.js';
     ComunModule,
     NotificacionesModule,
     AutenticacionModule,
+    SedesModule,
+    ServiciosModule,
+    ClientesModule,
+    FidelidadModule,
+    DisponibilidadModule,
+    AgendaModule,
+    VentasModule,
+    ReservasModule,
   ],
   controllers: [SaludController],
   providers: [

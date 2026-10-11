@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  arrayDeQuery,
   dineroSchema,
   fechaSchema,
   fechaHoraSchema,
@@ -154,6 +155,7 @@ export const cancelarReservaSchema = z.object({
   motivo: textoOpcional(500),
   notificar: z.boolean().default(true),
 });
+export type CancelarReservaDto = z.infer<typeof cancelarReservaSchema>;
 
 export const completarReservaSchema = z.object({
   metodoPago: z.enum(METODOS_PAGO).default('EFECTIVO'),
@@ -179,7 +181,7 @@ export const listarReservasSchema = paginacionSchema.extend({
   barberoId: idSchema.optional(),
   clienteId: idSchema.optional(),
   estado: z.enum(ESTADOS_RESERVA).optional(),
-  estados: z.array(z.enum(ESTADOS_RESERVA)).optional(),
+  estados: arrayDeQuery(z.enum(ESTADOS_RESERVA)).optional(),
   canal: z.enum(CANALES_RESERVA).optional(),
   desde: fechaSchema.optional(),
   hasta: fechaSchema.optional(),
@@ -196,7 +198,7 @@ export const consultarDisponibilidadSchema = z.object({
   barberoId: idSchema.optional(),
   fecha: fechaSchema,
   /** Para calcular si el servicio completo cabe en el hueco. */
-  servicioIds: z.array(idSchema).max(6).default([]),
+  servicioIds: arrayDeQuery(idSchema).default([]),
   /** Al reprogramar, ignora la propia reserva para no chocar consigo misma. */
   excluirReservaId: idSchema.optional(),
 });

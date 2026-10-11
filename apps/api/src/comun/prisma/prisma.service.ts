@@ -47,9 +47,22 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
    * de ocuparse", no un error 500.
    */
   static esViolacionDe(error: unknown, nombreRestriccion: string): boolean {
-    if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return false;
+    // Las restricciones de exclusión y las CHECK no tienen código propio en
+    // Prisma: llegan envueltas como `PrismaClientUnknownRequestError` con el
+    // error crudo de Postgres dentro del mensaje. Hay que mirar los dos tipos,
+    // o la restricción anti-solape acabaría como un 500 genérico en lugar del
+    // mensaje "ese horario acaba de ocuparse".
+    const esDePrisma =
+      error instanceof Prisma.PrismaClientKnownRequestError ||
+      error instanceof Prisma.PrismaClientUnknownRequestError;
 
-    const meta = error.meta as Record<string, unknown> | undefined;
+    if (!esDePrisma) return false;
+
+    const meta =
+      error instanceof Prisma.PrismaClientKnownRequestError
+        ? (error.meta as Record<string, unknown> | undefined)
+        : undefined;
+
     const texto = [
       typeof meta?.['constraint'] === 'string' ? meta['constraint'] : '',
       typeof meta?.['target'] === 'string' ? meta['target'] : '',
