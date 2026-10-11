@@ -134,15 +134,15 @@ export function DialogoCobrar({
         </ul>
 
         {fidelidad?.tienePremio ? (
-          <label className="border-primary/40 bg-primary/10 flex cursor-pointer items-start gap-2.5 rounded-lg border p-3">
+          <label className="border-exito/40 bg-exito/10 flex cursor-pointer items-start gap-2.5 rounded-lg border p-3">
             <input
               type="checkbox"
-              className="accent-primary mt-0.5"
+              className="accent-exito mt-0.5"
               checked={aplicarPremio}
               onChange={(e) => setAplicarPremio(e.target.checked)}
             />
             <span>
-              <span className="text-primary flex items-center gap-1.5 text-sm font-medium">
+              <span className="text-exito flex items-center gap-1.5 text-sm font-medium">
                 <Gift className="size-4" />
                 {fidelidad.mensaje ?? 'Tiene premio disponible'}
               </span>
@@ -163,7 +163,7 @@ export function DialogoCobrar({
 
         <div className="flex items-baseline justify-between gap-3">
           <span className="font-medium">Total a cobrar</span>
-          <span className="tabular text-primary text-2xl font-semibold">{pesos(totalFinal)}</span>
+          <span className="tabular text-2xl font-semibold">{pesos(totalFinal)}</span>
         </div>
 
         {totalFinal > 0 ? (

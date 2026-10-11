@@ -138,7 +138,7 @@ export function Armazon() {
                           cn(
                             'flex items-center gap-2.5 rounded-md px-2.5 py-2 text-sm font-medium transition-colors',
                             isActive
-                              ? 'bg-primary/15 text-primary'
+                              ? 'bg-accent text-foreground font-semibold'
                               : 'text-muted-foreground hover:bg-accent hover:text-foreground',
                           )
                         }

@@ -20,7 +20,13 @@ import { useSesion } from '@/hooks/sesion';
 import { Encabezado } from '@/componentes/armazon';
 import { Boton } from '@/componentes/ui/boton';
 import { Tarjeta, TarjetaContenido } from '@/componentes/ui/tarjeta';
-import { Avatar, Esqueleto, EstadoVacio, Insignia } from '@/componentes/ui/varios';
+import {
+  Avatar,
+  Esqueleto,
+  EstadoVacio,
+  Insignia,
+  VARIANTE_POR_ESTADO,
+} from '@/componentes/ui/varios';
 import { DialogoNuevaReserva } from '@/componentes/dialogo-nueva-reserva';
 import { DialogoCobrar } from '@/componentes/dialogo-cobrar';
 
@@ -237,7 +243,7 @@ function FilaCita({
               : (reserva.cliente?.nombreCompleto ?? 'Sin ficha')}
           </p>
 
-          <Insignia className={`estado-${reserva.estado}`}>
+          <Insignia variante={VARIANTE_POR_ESTADO[reserva.estado]}>
             {ETIQUETAS_ESTADO[reserva.estado]}
           </Insignia>
 

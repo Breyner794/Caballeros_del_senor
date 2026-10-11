@@ -1,20 +1,24 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+@import '@fontsource-variable/inter';
 
 @custom-variant dark (&:is(.dark *));
 
 /**
- * Tema del panel.
+ * Tema del panel — estilo «mira», paleta neutral.
  *
- * Fondo oscuro y un dorado envejecido como único acento. La razón no es
- * estética sin más: el panel se usa durante diez horas seguidas bajo las luces
- * de una barbería, muchas veces en una tablet apoyada en el mostrador. Un
- * fondo claro a pantalla completa cansa, y el dorado se reserva para lo que
- * hay que mirar (la acción principal, el premio de fidelidad disponible), así
- * que si algo brilla, es porque importa.
+ * La interfaz es blanco y negro: fondo blanco, texto negro y los grises
+ * intermedios para bordes y texto secundario. No hay color de marca
+ * decorativo.
  *
- * Los estados de las citas tienen color propio y consistente en todo el panel:
- * el barbero aprende una vez qué significa cada color y no lo vuelve a pensar.
+ * El color se reserva para lo que significa algo: el estado de una cita, un
+ * aviso, un error. Cuando casi nada tiene color, lo poco que lo tiene se ve
+ * desde el otro lado del local — que es justo lo que hace falta en una
+ * pantalla que está abierta diez horas al día.
+ *
+ * Los tokens neutros vienen del preset b1D0dv72. Los semánticos (`exito`,
+ * `aviso`) son propios y son los únicos que meten color al sistema.
  */
 
 @theme inline {
@@ -22,6 +26,8 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
 
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -43,70 +49,78 @@
   --color-input: var(--input);
   --color-ring: var(--ring);
 
+  /* Los dos únicos colores del sistema, y solo para avisos. */
   --color-exito: var(--exito);
   --color-exito-foreground: var(--exito-foreground);
   --color-aviso: var(--aviso);
   --color-aviso-foreground: var(--aviso-foreground);
 
-  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+  --font-heading: var(--font-sans);
 }
 
 :root {
-  --radius: 0.75rem;
+  --radius: 0.625rem;
 
-  /* Tema claro: para quien prefiera trabajar de día con luz natural. */
-  --background: oklch(0.985 0.002 85);
-  --foreground: oklch(0.21 0.006 60);
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.21 0.006 60);
+  --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.21 0.006 60);
-  --primary: oklch(0.55 0.1 72);
-  --primary-foreground: oklch(0.99 0.004 85);
-  --secondary: oklch(0.96 0.005 80);
-  --secondary-foreground: oklch(0.28 0.008 60);
-  --muted: oklch(0.96 0.005 80);
-  --muted-foreground: oklch(0.52 0.012 65);
-  --accent: oklch(0.94 0.014 78);
-  --accent-foreground: oklch(0.28 0.012 60);
-  --destructive: oklch(0.58 0.2 25);
-  --destructive-foreground: oklch(0.99 0.004 85);
-  --exito: oklch(0.56 0.13 152);
-  --exito-foreground: oklch(0.99 0.004 85);
-  --aviso: oklch(0.72 0.15 75);
-  --aviso-foreground: oklch(0.24 0.02 60);
-  --border: oklch(0.9 0.006 80);
-  --input: oklch(0.9 0.006 80);
-  --ring: oklch(0.55 0.1 72);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+
+  --destructive: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --exito: oklch(0.52 0.13 152);
+  --exito-foreground: oklch(0.985 0 0);
+  --aviso: oklch(0.62 0.15 60);
+  --aviso-foreground: oklch(0.985 0 0);
 }
 
+/**
+ * Modo oscuro.
+ *
+ * No es el modo por defecto: está para quien trabaje de noche o lo prefiera,
+ * y para respetar la preferencia del sistema si algún día se activa. También
+ * es neutro — gris muy oscuro y blanco, sin color de marca.
+ */
 .dark {
-  /* El modo por defecto del panel. */
-  --background: oklch(0.16 0.005 60);
-  --foreground: oklch(0.95 0.004 85);
-  --card: oklch(0.2 0.006 62);
-  --card-foreground: oklch(0.95 0.004 85);
-  --popover: oklch(0.22 0.007 62);
-  --popover-foreground: oklch(0.95 0.004 85);
-  /* Dorado envejecido: el acento de la barbería. */
-  --primary: oklch(0.76 0.13 78);
-  --primary-foreground: oklch(0.18 0.015 60);
-  --secondary: oklch(0.26 0.008 62);
-  --secondary-foreground: oklch(0.93 0.004 85);
-  --muted: oklch(0.25 0.007 62);
-  --muted-foreground: oklch(0.68 0.01 70);
-  --accent: oklch(0.29 0.014 70);
-  --accent-foreground: oklch(0.94 0.006 85);
-  --destructive: oklch(0.62 0.19 25);
-  --destructive-foreground: oklch(0.98 0.004 85);
-  --exito: oklch(0.68 0.14 152);
-  --exito-foreground: oklch(0.16 0.01 60);
-  --aviso: oklch(0.8 0.14 80);
-  --aviso-foreground: oklch(0.2 0.02 60);
-  --border: oklch(0.3 0.008 62);
-  --input: oklch(0.3 0.008 62);
-  --ring: oklch(0.76 0.13 78);
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+
+  --destructive: oklch(0.704 0.191 22.216);
+  --destructive-foreground: oklch(0.145 0 0);
+  --exito: oklch(0.7 0.14 152);
+  --exito-foreground: oklch(0.145 0 0);
+  --aviso: oklch(0.78 0.14 70);
+  --aviso-foreground: oklch(0.145 0 0);
 }
 
 @layer base {
@@ -114,51 +128,27 @@
     @apply border-border outline-ring/50;
   }
 
+  html {
+    @apply font-sans;
+  }
+
   body {
     @apply bg-background text-foreground font-sans antialiased;
     font-feature-settings: 'cv11', 'ss01';
   }
 
-  /* Los números de dinero y hora en tabla quedan alineados en columna. */
+  /* Los números de dinero y hora quedan alineados en columna. */
   .tabular {
     font-variant-numeric: tabular-nums;
   }
 
   ::selection {
-    @apply bg-primary/25;
+    @apply bg-foreground/15;
   }
 
   /* Barras de desplazamiento discretas: el panel tiene muchas listas. */
   * {
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
-  }
-}
-
-/**
- * Colores de los estados de una cita.
- *
- * Se definen como clases y no sueltos por el código para que un cambio de
- * criterio (por ejemplo, que "no asistió" pase a rojo) se haga en un sitio y
- * valga para la agenda, el calendario y la tabla a la vez.
- */
-@layer components {
-  .estado-PENDIENTE {
-    @apply bg-aviso/15 text-aviso border-aviso/30;
-  }
-  .estado-CONFIRMADA {
-    @apply bg-primary/15 text-primary border-primary/30;
-  }
-  .estado-EN_CURSO {
-    @apply bg-sky-500/15 text-sky-400 border-sky-500/30;
-  }
-  .estado-COMPLETADA {
-    @apply bg-exito/15 text-exito border-exito/30;
-  }
-  .estado-CANCELADA {
-    @apply bg-muted text-muted-foreground border-border;
-  }
-  .estado-NO_ASISTIO {
-    @apply bg-destructive/15 text-destructive border-destructive/30;
   }
 }

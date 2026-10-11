@@ -96,15 +96,9 @@ export function PaginaEntrar() {
 
   return (
     <div className="bg-background flex min-h-screen items-center justify-center p-4">
-      {/* Resplandor dorado de fondo, muy tenue */}
-      <div
-        aria-hidden
-        className="bg-primary/10 pointer-events-none fixed top-0 left-1/2 size-[520px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
-      />
-
-      <div className="relative w-full max-w-sm">
+      <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
-          <span className="bg-primary text-primary-foreground flex size-12 items-center justify-center rounded-xl shadow-lg">
+          <span className="bg-primary text-primary-foreground flex size-12 items-center justify-center rounded-xl">
             <Scissors className="size-6" />
           </span>
           <div>

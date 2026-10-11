@@ -16,10 +16,11 @@ const variantesInsignia = cva(
       variante: {
         neutra: 'bg-secondary text-secondary-foreground border-transparent',
         contorno: 'border-border text-foreground',
-        primaria: 'bg-primary/15 text-primary border-primary/30',
-        exito: 'bg-exito/15 text-exito border-exito/30',
-        aviso: 'bg-aviso/15 text-aviso border-aviso/30',
-        peligro: 'bg-destructive/15 text-destructive border-destructive/30',
+        primaria: 'bg-primary/10 text-primary border-primary/25',
+        exito: 'bg-exito/10 text-exito border-exito/30',
+        info: 'bg-sky-600/10 text-sky-700 border-sky-600/30 dark:text-sky-400',
+        aviso: 'bg-aviso/10 text-aviso border-aviso/30',
+        peligro: 'bg-destructive/10 text-destructive border-destructive/30',
       },
     },
     defaultVariants: { variante: 'neutra' },
@@ -301,3 +302,23 @@ export function EstadoVacio({
     </div>
   );
 }
+
+/**
+ * Qué variante de insignia le toca a cada estado de una cita.
+ *
+ * Va aquí, como dato tipado, y no como clases CSS en la capa "components":
+ * las utilidades de Tailwind tienen más precedencia que esa capa, así que una
+ * clase "estado-X" quedaría pisada por el fondo que la propia insignia aplica
+ * como utilidad, y todos los estados se verían iguales.
+ *
+ * El criterio de color: solo lo lleva el estado que pide una reacción
+ * distinta. Una cita confirmada es lo normal y va en neutro.
+ */
+export const VARIANTE_POR_ESTADO = {
+  PENDIENTE: 'aviso',
+  CONFIRMADA: 'neutra',
+  EN_CURSO: 'info',
+  COMPLETADA: 'exito',
+  CANCELADA: 'neutra',
+  NO_ASISTIO: 'peligro',
+} as const satisfies Record<string, VariantProps<typeof variantesInsignia>['variante']>;

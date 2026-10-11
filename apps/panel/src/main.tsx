@@ -23,9 +23,6 @@ const clienteConsultas = new QueryClient({
   },
 });
 
-// El panel arranca siempre en oscuro: es como se va a usar en el local.
-document.documentElement.classList.add('dark');
-
 createRoot(document.getElementById('raiz') as HTMLElement).render(
   <StrictMode>
     <QueryClientProvider client={clienteConsultas}>

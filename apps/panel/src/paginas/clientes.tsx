@@ -168,7 +168,7 @@ export function PaginaClientes() {
                       </p>
                     </div>
                     {cliente.tienePremio ? (
-                      <Insignia variante="primaria">
+                      <Insignia variante="exito">
                         <Gift className="size-3" />
                         Premio
                       </Insignia>
@@ -250,7 +250,7 @@ function TarjetaCortes({
 }) {
   if (premio) {
     return (
-      <Insignia variante="primaria">
+      <Insignia variante="exito">
         <Gift className="size-3" />
         Corte gratis
       </Insignia>

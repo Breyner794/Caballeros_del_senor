@@ -327,15 +327,15 @@ export function DialogoNuevaReserva({
                 {/* El aviso del premio: lo que el barbero tiene que ver antes
                     de cobrar, sin tener que entrar a la ficha. */}
                 {clienteElegido.tienePremio ? (
-                  <label className="border-primary/40 bg-primary/10 mt-2 flex cursor-pointer items-start gap-2 rounded-md border p-2">
+                  <label className="border-exito/40 bg-exito/10 mt-2 flex cursor-pointer items-start gap-2 rounded-md border p-2">
                     <input
                       type="checkbox"
-                      className="accent-primary mt-0.5"
+                      className="accent-exito mt-0.5"
                       checked={aplicarPremio}
                       onChange={(e) => setAplicarPremio(e.target.checked)}
                     />
                     <span className="text-sm">
-                      <span className="text-primary flex items-center gap-1 font-medium">
+                      <span className="text-exito flex items-center gap-1 font-medium">
                         <Gift className="size-3.5" />
                         Tiene {clienteElegido.sellosDisponibles} sellos: este corte puede ir gratis
                       </span>
@@ -444,7 +444,7 @@ export function DialogoNuevaReserva({
                             </p>
                           </div>
                           {c.tienePremio ? (
-                            <Insignia variante="primaria">
+                            <Insignia variante="exito">
                               <Gift className="size-3" />
                               Premio
                             </Insignia>
