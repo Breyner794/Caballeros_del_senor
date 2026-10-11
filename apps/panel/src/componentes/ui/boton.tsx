@@ -41,17 +41,29 @@ export const Boton = React.forwardRef<HTMLButtonElement, PropsBoton>(
     { className, variante, tamano, comoHijo = false, cargando = false, children, disabled, ...props },
     ref,
   ) => {
-    const Comp = comoHijo ? Slot : 'button';
+    const clases = cn(variantes({ variante, tamano }), className);
+
+    /**
+     * Con `comoHijo`, el botón presta sus estilos a otro elemento (un enlace
+     * de react-router, un `<a href="tel:…">`). Radix exige entonces un único
+     * hijo elemento, así que no se puede anteponer el indicador de carga: dos
+     * hijos —aunque uno sea `null`— hacen que Slot falle en tiempo de
+     * ejecución. Un enlace tampoco tiene estado de carga, de modo que la
+     * restricción no quita nada.
+     */
+    if (comoHijo) {
+      return (
+        <Slot ref={ref} className={clases} {...props}>
+          {children}
+        </Slot>
+      );
+    }
+
     return (
-      <Comp
-        ref={ref}
-        className={cn(variantes({ variante, tamano }), className)}
-        disabled={disabled || cargando}
-        {...props}
-      >
+      <button ref={ref} className={clases} disabled={disabled || cargando} {...props}>
         {cargando ? <Loader2 className="animate-spin" /> : null}
         {children}
-      </Comp>
+      </button>
     );
   },
 );

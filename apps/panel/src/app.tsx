@@ -7,6 +7,8 @@ import { PaginaHoy } from '@/paginas/hoy';
 import { PaginaDisponibilidad } from '@/paginas/disponibilidad';
 import { PaginaClientes } from '@/paginas/clientes';
 import { PaginaServicios } from '@/paginas/servicios';
+import { PaginaReservas } from '@/paginas/reservas';
+import { PaginaCronograma } from '@/paginas/cronograma';
 import { PaginaEnConstruccion } from '@/paginas/en-construccion';
 
 /** Mientras se comprueba si hay sesión viva en la cookie de refresco. */
@@ -53,26 +55,8 @@ export function App() {
         <Route path="/clientes" element={<PaginaClientes />} />
         <Route path="/servicios" element={<PaginaServicios />} />
 
-        <Route
-          path="/reservas"
-          element={
-            <PaginaEnConstruccion
-              titulo="Reservas"
-              descripcion="Todas las citas, con filtros por sede, barbero, estado y fecha."
-              pendiente="La creación de reservas ya funciona desde «Hoy» y desde «Disponibilidad». Aquí irá la tabla completa con filtros, búsqueda por código y las acciones de reprogramar y cancelar."
-            />
-          }
-        />
-        <Route
-          path="/cronograma"
-          element={
-            <PaginaEnConstruccion
-              titulo="Cronograma"
-              descripcion="Horario semanal de cada barbero, almuerzos y días libres."
-              pendiente="La API ya guarda la plantilla semanal y avisa si intentas cerrar un día que tiene citas, con la lista de clientes a los que llamar. Falta la pantalla para editarlo."
-            />
-          }
-        />
+        <Route path="/reservas" element={<PaginaReservas />} />
+        <Route path="/cronograma" element={<PaginaCronograma />} />
         <Route
           path="/inventario"
           element={

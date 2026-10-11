@@ -10,7 +10,9 @@ import {
 import { contiene, seSolapan } from '../dominio/horarios.js';
 
 export const TIPOS_BLOQUE = ['ALMUERZO', 'DESCANSO', 'ADMINISTRATIVO'] as const;
+export type TipoBloqueAgenda = (typeof TIPOS_BLOQUE)[number];
 export const TIPOS_EXCEPCION = ['CERRADO', 'HORARIO_ESPECIAL'] as const;
+export type TipoExcepcionAgenda = (typeof TIPOS_EXCEPCION)[number];
 export const TIPOS_DIA_ESPECIAL = ['FESTIVO_CERRADO', 'FESTIVO_ABIERTO', 'HORARIO_ESPECIAL'] as const;
 
 export const bloqueAgendaSchema = z
