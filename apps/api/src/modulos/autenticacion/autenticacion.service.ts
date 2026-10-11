@@ -315,6 +315,23 @@ export class AutenticacionService {
     });
   }
 
+  /**
+   * Perfil completo del usuario de la sesion.
+   *
+   * El panel lo pide al arrancar: necesita la sede, las sedes permitidas y los
+   * permisos, no solo el identificador.
+   */
+  async perfil(usuarioId: string): Promise<UsuarioSesion> {
+    const usuario = await this.prisma.usuario.findUniqueOrThrow({
+      where: { id: usuarioId },
+      include: {
+        sede: { select: { id: true, nombre: true } },
+        sedesPermitidas: { select: { sede: { select: { id: true, nombre: true } } } },
+      },
+    });
+    return this.aUsuarioSesion(usuario);
+  }
+
   // ============================ AUXILIARES ================================
 
   private async registrarFallo(

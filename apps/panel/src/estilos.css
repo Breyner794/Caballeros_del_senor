@@ -1,0 +1,164 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+
+@custom-variant dark (&:is(.dark *));
+
+/**
+ * Tema del panel.
+ *
+ * Fondo oscuro y un dorado envejecido como único acento. La razón no es
+ * estética sin más: el panel se usa durante diez horas seguidas bajo las luces
+ * de una barbería, muchas veces en una tablet apoyada en el mostrador. Un
+ * fondo claro a pantalla completa cansa, y el dorado se reserva para lo que
+ * hay que mirar (la acción principal, el premio de fidelidad disponible), así
+ * que si algo brilla, es porque importa.
+ *
+ * Los estados de las citas tienen color propio y consistente en todo el panel:
+ * el barbero aprende una vez qué significa cada color y no lo vuelve a pensar.
+ */
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --color-exito: var(--exito);
+  --color-exito-foreground: var(--exito-foreground);
+  --color-aviso: var(--aviso);
+  --color-aviso-foreground: var(--aviso-foreground);
+
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: ui-monospace, 'Cascadia Code', 'Source Code Pro', monospace;
+}
+
+:root {
+  --radius: 0.75rem;
+
+  /* Tema claro: para quien prefiera trabajar de día con luz natural. */
+  --background: oklch(0.985 0.002 85);
+  --foreground: oklch(0.21 0.006 60);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.21 0.006 60);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.21 0.006 60);
+  --primary: oklch(0.55 0.1 72);
+  --primary-foreground: oklch(0.99 0.004 85);
+  --secondary: oklch(0.96 0.005 80);
+  --secondary-foreground: oklch(0.28 0.008 60);
+  --muted: oklch(0.96 0.005 80);
+  --muted-foreground: oklch(0.52 0.012 65);
+  --accent: oklch(0.94 0.014 78);
+  --accent-foreground: oklch(0.28 0.012 60);
+  --destructive: oklch(0.58 0.2 25);
+  --destructive-foreground: oklch(0.99 0.004 85);
+  --exito: oklch(0.56 0.13 152);
+  --exito-foreground: oklch(0.99 0.004 85);
+  --aviso: oklch(0.72 0.15 75);
+  --aviso-foreground: oklch(0.24 0.02 60);
+  --border: oklch(0.9 0.006 80);
+  --input: oklch(0.9 0.006 80);
+  --ring: oklch(0.55 0.1 72);
+}
+
+.dark {
+  /* El modo por defecto del panel. */
+  --background: oklch(0.16 0.005 60);
+  --foreground: oklch(0.95 0.004 85);
+  --card: oklch(0.2 0.006 62);
+  --card-foreground: oklch(0.95 0.004 85);
+  --popover: oklch(0.22 0.007 62);
+  --popover-foreground: oklch(0.95 0.004 85);
+  /* Dorado envejecido: el acento de la barbería. */
+  --primary: oklch(0.76 0.13 78);
+  --primary-foreground: oklch(0.18 0.015 60);
+  --secondary: oklch(0.26 0.008 62);
+  --secondary-foreground: oklch(0.93 0.004 85);
+  --muted: oklch(0.25 0.007 62);
+  --muted-foreground: oklch(0.68 0.01 70);
+  --accent: oklch(0.29 0.014 70);
+  --accent-foreground: oklch(0.94 0.006 85);
+  --destructive: oklch(0.62 0.19 25);
+  --destructive-foreground: oklch(0.98 0.004 85);
+  --exito: oklch(0.68 0.14 152);
+  --exito-foreground: oklch(0.16 0.01 60);
+  --aviso: oklch(0.8 0.14 80);
+  --aviso-foreground: oklch(0.2 0.02 60);
+  --border: oklch(0.3 0.008 62);
+  --input: oklch(0.3 0.008 62);
+  --ring: oklch(0.76 0.13 78);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  body {
+    @apply bg-background text-foreground font-sans antialiased;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  /* Los números de dinero y hora en tabla quedan alineados en columna. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+
+  ::selection {
+    @apply bg-primary/25;
+  }
+
+  /* Barras de desplazamiento discretas: el panel tiene muchas listas. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+}
+
+/**
+ * Colores de los estados de una cita.
+ *
+ * Se definen como clases y no sueltos por el código para que un cambio de
+ * criterio (por ejemplo, que "no asistió" pase a rojo) se haga en un sitio y
+ * valga para la agenda, el calendario y la tabla a la vez.
+ */
+@layer components {
+  .estado-PENDIENTE {
+    @apply bg-aviso/15 text-aviso border-aviso/30;
+  }
+  .estado-CONFIRMADA {
+    @apply bg-primary/15 text-primary border-primary/30;
+  }
+  .estado-EN_CURSO {
+    @apply bg-sky-500/15 text-sky-400 border-sky-500/30;
+  }
+  .estado-COMPLETADA {
+    @apply bg-exito/15 text-exito border-exito/30;
+  }
+  .estado-CANCELADA {
+    @apply bg-muted text-muted-foreground border-border;
+  }
+  .estado-NO_ASISTIO {
+    @apply bg-destructive/15 text-destructive border-destructive/30;
+  }
+}

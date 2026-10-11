@@ -41,6 +41,15 @@ export interface DatosDispositivo {
 export class TokensService {
   private readonly logger = new Logger(TokensService.name);
 
+  /**
+   * Segundos durante los que un token recién rotado no cuenta como robo.
+   *
+   * Lo bastante corto para no abrir una ventana útil a un atacante y lo
+   * bastante largo para cubrir el reintento de una pestaña que perdió la
+   * carrera, incluso con una conexión lenta.
+   */
+  private static readonly GRACIA_ROTACION_S = 20;
+
   constructor(
     private readonly jwt: JwtService,
     private readonly config: ConfigService,
@@ -108,12 +117,45 @@ export class TokensService {
         familiaId: true,
         expiraEn: true,
         revocadaEn: true,
+        motivoRevoca: true,
         usuario: { select: { rol: true, activo: true, eliminadoEn: true } },
       },
     });
 
-    // Token válido en firma pero desconocido o ya usado: señal de robo.
-    if (!sesion || sesion.revocadaEn) {
+    // Token válido en firma pero desconocido: señal clara de robo.
+    if (!sesion) {
+      await this.revocarFamilia(payload.fam, 'Reutilización de refresh token detectada');
+      this.logger.warn(
+        `Refresh token desconocido (familia ${payload.fam}, usuario ${payload.sub}). Familia revocada.`,
+      );
+      throw ErrorNegocio.noAutenticado(CODIGOS_ERROR.TOKEN_REUTILIZADO);
+    }
+
+    if (sesion.revocadaEn) {
+      /**
+       * Ventana de gracia tras la rotación.
+       *
+       * Dos pestañas abiertas del panel refrescan a la vez con la misma cookie:
+       * una gana y rota el token, la otra llega con el que acaba de quedar
+       * obsoleto. Sin esta ventana, esa carrera perfectamente normal se
+       * interpretaría como un robo y echaría al usuario de todas sus sesiones
+       * — algo que en recepción, con el panel abierto en varias pestañas,
+       * pasaría a diario.
+       *
+       * Durante unos segundos tras la rotación se devuelve un 401 normal y la
+       * pestaña perdedora reintenta: para entonces el navegador ya tiene la
+       * cookie nueva (es compartida entre pestañas) y el reintento funciona.
+       * Un atacante no gana nada: sigue necesitando la cookie vigente, que ya
+       * no es la que tiene.
+       */
+      const segundosDesdeRotacion = (Date.now() - sesion.revocadaEn.getTime()) / 1000;
+      const esRotacionReciente =
+        sesion.motivoRevoca === 'Rotada' && segundosDesdeRotacion <= TokensService.GRACIA_ROTACION_S;
+
+      if (esRotacionReciente) {
+        throw ErrorNegocio.noAutenticado(CODIGOS_ERROR.SESION_EXPIRADA);
+      }
+
       await this.revocarFamilia(payload.fam, 'Reutilización de refresh token detectada');
       this.logger.warn(
         `Refresh token reutilizado (familia ${payload.fam}, usuario ${payload.sub}). Familia revocada.`,

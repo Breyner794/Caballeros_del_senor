@@ -14,12 +14,13 @@ pnpm db:migrate
 pnpm db:seed
 ```
 
-Arrancar la API:
+Arrancar todo (API + panel):
 
 ```bash
-pnpm --filter @cds/api dev
+pnpm dev
 ```
 
+- Panel administrativo: http://localhost:5173
 - API: http://localhost:3001/api/v1
 - Documentación (solo fuera de producción): http://localhost:3001/api/v1/docs
 - Salud: `/api/v1/salud` (proceso vivo) y `/api/v1/salud/listo` (incluye base de datos)

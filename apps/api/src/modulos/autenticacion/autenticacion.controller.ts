@@ -123,17 +123,8 @@ export class AutenticacionController {
 
   /** Datos del usuario de la sesión actual: lo primero que pide el panel. */
   @Get('yo')
-  yo(@UsuarioActual() usuario: UsuarioAutenticado): Partial<UsuarioSesion> & { id: string } {
-    return {
-      id: usuario.id,
-      nombre: usuario.nombre,
-      apellido: usuario.apellido,
-      email: usuario.email,
-      rol: usuario.rol,
-      sedeId: usuario.sedeId,
-      permisos: usuario.permisos,
-      debeCambiarPassword: usuario.debeCambiarPassword,
-    };
+  yo(@UsuarioActual() usuario: UsuarioAutenticado): Promise<UsuarioSesion> {
+    return this.servicio.perfil(usuario.id);
   }
 
   /**

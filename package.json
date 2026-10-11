@@ -7,7 +7,7 @@
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm -r --parallel dev",
+    "dev": "pnpm --filter @cds/shared build && pnpm -r --parallel --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint",
     "typecheck": "pnpm -r typecheck",
@@ -16,7 +16,9 @@
     "db:down": "docker compose down",
     "db:migrate": "pnpm --filter @cds/api prisma:migrate",
     "db:seed": "pnpm --filter @cds/api prisma:seed",
-    "db:studio": "pnpm --filter @cds/api prisma:studio"
+    "db:studio": "pnpm --filter @cds/api prisma:studio",
+    "dev:api": "pnpm --filter @cds/api dev",
+    "dev:panel": "pnpm --filter @cds/panel dev"
   },
   "devDependencies": {
     "prettier": "^3.4.2",

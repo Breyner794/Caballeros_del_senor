@@ -671,7 +671,12 @@ export class DisponibilidadService {
 
     const where: Prisma.ReservaWhereInput = {
       barberoId: { in: barberoIds },
-      estado: { in: ['PENDIENTE', 'CONFIRMADA', 'EN_CURSO'] },
+      // COMPLETADA también ocupa: esa silla estuvo usada a esa hora y el
+      // calendario del mes lo cuenta igual. Si aquí no se incluyera, el
+      // resumen del mes y el detalle del día dirían cosas distintas sobre el
+      // mismo día, que es la forma más rápida de que nadie se fíe de ninguno.
+      // CANCELADA y NO_ASISTIO sí liberan el hueco al instante.
+      estado: { in: ['PENDIENTE', 'CONFIRMADA', 'EN_CURSO', 'COMPLETADA'] },
       inicioEn: { gte: inicio, lt: fin },
       ...(excluirReservaId ? { id: { not: excluirReservaId } } : {}),
     };
