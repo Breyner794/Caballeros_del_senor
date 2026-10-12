@@ -23,6 +23,8 @@ import { ReservasModule } from './modulos/reservas/reservas.module.js';
 import { UsuariosModule } from './modulos/usuarios/usuarios.module.js';
 import { ConfiguracionModule } from './modulos/configuracion/configuracion.module.js';
 import { AuditoriaConsultaModule } from './modulos/auditoria/auditoria.module.js';
+import { InventarioModule } from './modulos/inventario/inventario.module.js';
+import { ContabilidadModule } from './modulos/contabilidad/contabilidad.module.js';
 import { SaludController } from './comun/salud/salud.controller.js';
 
 @Module({
@@ -66,6 +68,8 @@ import { SaludController } from './comun/salud/salud.controller.js';
     UsuariosModule,
     ConfiguracionModule,
     AuditoriaConsultaModule,
+    InventarioModule,
+    ContabilidadModule,
   ],
   controllers: [SaludController],
   providers: [

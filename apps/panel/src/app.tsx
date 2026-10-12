@@ -13,7 +13,9 @@ import { PaginaUsuarios } from '@/paginas/usuarios';
 import { PaginaSedes } from '@/paginas/sedes';
 import { PaginaConfiguracion } from '@/paginas/configuracion';
 import { PaginaPerfil } from '@/paginas/perfil';
-import { PaginaEnConstruccion } from '@/paginas/en-construccion';
+import { PaginaAuditoria } from '@/paginas/auditoria';
+import { PaginaInventario } from '@/paginas/inventario';
+import { PaginaContabilidad } from '@/paginas/contabilidad';
 
 /** Mientras se comprueba si hay sesión viva en la cookie de refresco. */
 function Arrancando() {
@@ -61,38 +63,11 @@ export function App() {
 
         <Route path="/reservas" element={<PaginaReservas />} />
         <Route path="/cronograma" element={<PaginaCronograma />} />
-        <Route
-          path="/inventario"
-          element={
-            <PaginaEnConstruccion
-              titulo="Inventario"
-              descripcion="Entradas de productos, stock por sede y ventas de mostrador."
-              pendiente="El modelo de datos y el descuento de stock al vender ya están; falta la pantalla de productos y movimientos."
-            />
-          }
-        />
-        <Route
-          path="/contabilidad"
-          element={
-            <PaginaEnConstruccion
-              titulo="Contabilidad"
-              descripcion="Resumen de ingresos por barbero, por sede y en total."
-              pendiente="Las ventas ya se registran con la comisión congelada y los porcentajes historizados. Faltan los gráficos y la calculadora de reparto."
-            />
-          }
-        />
+        <Route path="/inventario" element={<PaginaInventario />} />
+        <Route path="/contabilidad" element={<PaginaContabilidad />} />
         <Route path="/sedes" element={<PaginaSedes />} />
         <Route path="/usuarios" element={<PaginaUsuarios />} />
-        <Route
-          path="/auditoria"
-          element={
-            <PaginaEnConstruccion
-              titulo="Auditoría"
-              descripcion="Quién hizo qué, cuándo y desde dónde."
-              pendiente="Ya se registra todo (incluido quién entregó cada premio de fidelidad y quién atendió sin registrar al cliente). Falta la pantalla para consultarlo."
-            />
-          }
-        />
+        <Route path="/auditoria" element={<PaginaAuditoria />} />
         <Route path="/configuracion" element={<PaginaConfiguracion />} />
         <Route path="/perfil" element={<PaginaPerfil />} />
       </Route>
