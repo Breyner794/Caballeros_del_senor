@@ -9,6 +9,10 @@ import { PaginaClientes } from '@/paginas/clientes';
 import { PaginaServicios } from '@/paginas/servicios';
 import { PaginaReservas } from '@/paginas/reservas';
 import { PaginaCronograma } from '@/paginas/cronograma';
+import { PaginaUsuarios } from '@/paginas/usuarios';
+import { PaginaSedes } from '@/paginas/sedes';
+import { PaginaConfiguracion } from '@/paginas/configuracion';
+import { PaginaPerfil } from '@/paginas/perfil';
 import { PaginaEnConstruccion } from '@/paginas/en-construccion';
 
 /** Mientras se comprueba si hay sesión viva en la cookie de refresco. */
@@ -77,26 +81,8 @@ export function App() {
             />
           }
         />
-        <Route
-          path="/sedes"
-          element={
-            <PaginaEnConstruccion
-              titulo="Sedes"
-              descripcion="Nombre, dirección y horario de atención de cada local."
-              pendiente="La API está completa; falta el formulario."
-            />
-          }
-        />
-        <Route
-          path="/usuarios"
-          element={
-            <PaginaEnConstruccion
-              titulo="Usuarios"
-              descripcion="Quién entra al panel y con qué rol."
-              pendiente="Falta el módulo. Por ahora los usuarios se crean con el seed."
-            />
-          }
-        />
+        <Route path="/sedes" element={<PaginaSedes />} />
+        <Route path="/usuarios" element={<PaginaUsuarios />} />
         <Route
           path="/auditoria"
           element={
@@ -107,26 +93,8 @@ export function App() {
             />
           }
         />
-        <Route
-          path="/configuracion"
-          element={
-            <PaginaEnConstruccion
-              titulo="Configuración"
-              descripcion="Slots, tiempo de limpieza, plazos de cancelación y festivos."
-              pendiente="La API ya expone y respeta todos estos valores; falta la pantalla."
-            />
-          }
-        />
-        <Route
-          path="/perfil"
-          element={
-            <PaginaEnConstruccion
-              titulo="Mi perfil"
-              descripcion="Tus datos, tu contraseña y tu sede."
-              pendiente="Falta la pantalla. El cambio de contraseña ya funciona en la API y cierra todas las sesiones al hacerlo."
-            />
-          }
-        />
+        <Route path="/configuracion" element={<PaginaConfiguracion />} />
+        <Route path="/perfil" element={<PaginaPerfil />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

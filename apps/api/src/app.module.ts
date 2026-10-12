@@ -20,6 +20,9 @@ import { DisponibilidadModule } from './modulos/disponibilidad/disponibilidad.mo
 import { AgendaModule } from './modulos/agenda/agenda.module.js';
 import { VentasModule } from './modulos/ventas/ventas.module.js';
 import { ReservasModule } from './modulos/reservas/reservas.module.js';
+import { UsuariosModule } from './modulos/usuarios/usuarios.module.js';
+import { ConfiguracionModule } from './modulos/configuracion/configuracion.module.js';
+import { AuditoriaConsultaModule } from './modulos/auditoria/auditoria.module.js';
 import { SaludController } from './comun/salud/salud.controller.js';
 
 @Module({
@@ -60,6 +63,9 @@ import { SaludController } from './comun/salud/salud.controller.js';
     AgendaModule,
     VentasModule,
     ReservasModule,
+    UsuariosModule,
+    ConfiguracionModule,
+    AuditoriaConsultaModule,
   ],
   controllers: [SaludController],
   providers: [
