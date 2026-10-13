@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import {
+  booleanoDeQuery,
   diaSemanaSchema,
   dineroSchema,
   emailSchema,
@@ -75,8 +76,8 @@ export const actualizarServicioSchema = crearServicioSchema.partial();
 export type ActualizarServicioDto = z.infer<typeof actualizarServicioSchema>;
 
 export const listarServiciosSchema = paginacionSchema.extend({
-  activo: z.coerce.boolean().optional(),
-  visibleWeb: z.coerce.boolean().optional(),
+  activo: booleanoDeQuery.optional(),
+  visibleWeb: booleanoDeQuery.optional(),
 });
 
 // ============================= USUARIOS =====================================
@@ -128,7 +129,7 @@ export type ActualizarUsuarioDto = z.infer<typeof actualizarUsuarioSchema>;
 export const listarUsuariosSchema = paginacionSchema.extend({
   rol: z.enum(ROLES).optional(),
   sedeId: idSchema.optional(),
-  activo: z.coerce.boolean().optional(),
+  activo: booleanoDeQuery.optional(),
 });
 
 /** Reseteo de contraseña hecho por un administrador. */
@@ -162,11 +163,11 @@ export const actualizarClienteSchema = crearClienteSchema.partial();
 export type ActualizarClienteDto = z.infer<typeof actualizarClienteSchema>;
 
 export const listarClientesSchema = paginacionSchema.extend({
-  activo: z.coerce.boolean().optional(),
+  activo: booleanoDeQuery.optional(),
   /** Solo los que ya tienen el premio de fidelidad disponible. */
-  conPremioDisponible: z.coerce.boolean().optional(),
+  conPremioDisponible: booleanoDeQuery.optional(),
   /** Clientes cuya fecha estimada de regreso ya pasó: candidatos a recordar. */
-  pendientesDeRegreso: z.coerce.boolean().optional(),
+  pendientesDeRegreso: booleanoDeQuery.optional(),
   sedeId: idSchema.optional(),
   barberoId: idSchema.optional(),
 });

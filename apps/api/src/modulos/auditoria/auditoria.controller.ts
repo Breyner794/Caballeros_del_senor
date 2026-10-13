@@ -1,6 +1,6 @@
 import { Body, Controller, Get, Param, ParseUUIDPipe, Patch, Query } from '@nestjs/common';
 import { z } from 'zod';
-import { fechaSchema, paginacionSchema } from '@cds/shared';
+import { booleanoDeQuery, fechaSchema, paginacionSchema } from '@cds/shared';
 import { RequierePermisos, UsuarioActual } from '../../comun/autenticacion/decoradores.js';
 import type { UsuarioAutenticado } from '../../comun/autenticacion/tipos.js';
 import { validar } from '../../comun/validacion/zod.pipe.js';
@@ -23,7 +23,7 @@ const filtrosAuditoria = paginacionSchema.extend({
 
 const filtrosErrores = paginacionSchema.extend({
   nivel: z.enum(['WARN', 'ERROR', 'FATAL']).optional(),
-  resueltos: z.coerce.boolean().optional(),
+  resueltos: booleanoDeQuery.optional(),
 });
 
 @Controller('auditoria')

@@ -13,6 +13,15 @@ import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
 import type { UsuarioAutenticado } from '../../comun/autenticacion/tipos.js';
 import { aSlug } from '../../comun/utilidades/slug.js';
 
+export interface UsoServicio {
+  /** Veces que se ha incluido en una reserva, en toda la historia. */
+  total: number;
+  /** Citas aún sin atender que lo incluyen: son las que bloquean eliminarlo. */
+  futuras: number;
+}
+
+export type ServicioConUsos = Servicio & { usos: UsoServicio };
+
 export interface FiltrosServicios {
   pagina: number;
   limite: number;
@@ -29,7 +38,7 @@ export class ServiciosService {
     private readonly auditoria: AuditoriaService,
   ) {}
 
-  async listar(filtros: FiltrosServicios): Promise<PaginaRespuesta<Servicio>> {
+  async listar(filtros: FiltrosServicios): Promise<PaginaRespuesta<ServicioConUsos>> {
     const { skip, take, pagina, limite } = calcularSalto(filtros.pagina, filtros.limite);
 
     const where: Prisma.ServicioWhereInput = {
@@ -46,7 +55,7 @@ export class ServiciosService {
         : {}),
     };
 
-    const [datos, total] = await this.prisma.$transaction([
+    const [servicios, total] = await this.prisma.$transaction([
       this.prisma.servicio.findMany({
         where,
         skip,
@@ -56,7 +65,59 @@ export class ServiciosService {
       this.prisma.servicio.count({ where }),
     ]);
 
+    const usos = await this.contarUsos(servicios.map((s) => s.id));
+    const datos = servicios.map((servicio) => ({
+      ...servicio,
+      usos: usos.get(servicio.id) ?? { total: 0, futuras: 0 },
+    }));
+
     return { datos, meta: construirMeta(total, pagina, limite) };
+  }
+
+  /**
+   * Cuántas veces se ha usado cada servicio y cuántas citas pendientes lo
+   * tienen.
+   *
+   * Las futuras son el dato que importa en la pantalla: son las que impiden
+   * eliminarlo, y conviene que se vea en la tarjeta antes de intentarlo en vez
+   * de que el aviso aparezca al pulsar el botón.
+   *
+   * Dos agregaciones para toda la página, no una consulta por servicio.
+   */
+  private async contarUsos(ids: string[]): Promise<Map<string, UsoServicio>> {
+    const mapa = new Map<string, UsoServicio>();
+    if (ids.length === 0) return mapa;
+
+    const [totales, futuras] = await Promise.all([
+      this.prisma.reservaServicio.groupBy({
+        by: ['servicioId'],
+        where: { servicioId: { in: ids } },
+        _count: { servicioId: true },
+        orderBy: { servicioId: 'asc' },
+      }),
+      this.prisma.reservaServicio.groupBy({
+        by: ['servicioId'],
+        where: {
+          servicioId: { in: ids },
+          reserva: {
+            inicioEn: { gte: new Date() },
+            estado: { in: ['PENDIENTE', 'CONFIRMADA', 'EN_CURSO'] },
+          },
+        },
+        _count: { servicioId: true },
+        orderBy: { servicioId: 'asc' },
+      }),
+    ]);
+
+    for (const fila of totales) {
+      mapa.set(fila.servicioId, { total: fila._count.servicioId, futuras: 0 });
+    }
+    for (const fila of futuras) {
+      const actual = mapa.get(fila.servicioId) ?? { total: 0, futuras: 0 };
+      mapa.set(fila.servicioId, { ...actual, futuras: fila._count.servicioId });
+    }
+
+    return mapa;
   }
 
   /** Catálogo completo para los selectores del formulario de reservas. */
@@ -194,7 +255,13 @@ export class ServiciosService {
     return { reservasFuturas: 0 };
   }
 
-  /** Reordenar la lista arrastrando tarjetas en el panel. */
+  /**
+   * Reordenar el catálogo.
+   *
+   * El panel manda la lista entera renumerada desde cero, no solo las dos
+   * tarjetas que se intercambian: los `orden` guardados pueden tener huecos o
+   * repetidos de ediciones anteriores, y así la secuencia queda siempre limpia.
+   */
   async reordenar(orden: { id: string; orden: number }[], actor: UsuarioAutenticado): Promise<void> {
     await this.prisma.$transaction(
       orden.map((item) =>

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import {
   arrayDeQuery,
+  booleanoDeQuery,
   dineroSchema,
   fechaSchema,
   fechaHoraSchema,
@@ -186,7 +187,7 @@ export const listarReservasSchema = paginacionSchema.extend({
   desde: fechaSchema.optional(),
   hasta: fechaSchema.optional(),
   /** Solo las de hoy: es la vista por defecto del panel. */
-  soloHoy: z.coerce.boolean().optional(),
+  soloHoy: booleanoDeQuery.optional(),
 });
 
 // ======================= DISPONIBILIDAD =====================================

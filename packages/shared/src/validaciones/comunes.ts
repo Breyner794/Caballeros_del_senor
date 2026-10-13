@@ -160,3 +160,24 @@ export const arrayDeQuery = <T extends z.ZodTypeAny>(elemento: T) =>
     }
     return [valor];
   }, z.array(elemento));
+
+/**
+ * Booleano que llega por query string.
+ *
+ * `z.coerce.boolean()` no sirve aquí: aplica `Boolean(valor)` y en una URL todo
+ * llega como texto, así que `?activo=false` se convierte en `true` y el filtro
+ * devuelve justo lo contrario de lo que se pidió, sin error que lo delate.
+ *
+ * Solo se aceptan las formas que de verdad genera un frontend; cualquier otra
+ * cosa es un error de validación y no un `true` silencioso.
+ */
+export const booleanoDeQuery = z.preprocess((valor) => {
+  if (typeof valor === 'boolean' || valor === undefined) return valor;
+  if (valor === null || valor === '') return undefined;
+  if (typeof valor === 'string') {
+    const texto = valor.trim().toLowerCase();
+    if (['true', '1', 'si', 'sí'].includes(texto)) return true;
+    if (['false', '0', 'no'].includes(texto)) return false;
+  }
+  return valor;
+}, z.boolean());

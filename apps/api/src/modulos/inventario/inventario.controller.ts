@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { z } from 'zod';
 import {
+  booleanoDeQuery,
   dineroSchema,
   fechaSchema,
   idSchema,
@@ -68,8 +69,8 @@ const conteoSchema = z.object({
 const filtrosProductos = paginacionSchema.extend({
   categoriaId: idSchema.optional(),
   sedeId: idSchema.optional(),
-  soloBajoMinimo: z.coerce.boolean().optional(),
-  activo: z.coerce.boolean().optional(),
+  soloBajoMinimo: booleanoDeQuery.optional(),
+  activo: booleanoDeQuery.optional(),
 });
 
 const filtrosMovimientos = paginacionSchema.extend({
