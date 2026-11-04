@@ -1,8 +1,19 @@
 import { Injectable } from '@nestjs/common';
-import type { BarberoPublico, ConfigPublica, OpcionesPublicas } from '@cds/shared';
+import type {
+  BarberoPublico,
+  ConfigPublica,
+  ConsultarCalendarioPublicoDto,
+  ConsultarDisponibilidadPublicaDto,
+  DiaCalendarioPublico,
+  HuecoDisponible,
+  HuecoPublico,
+  OpcionesPublicas,
+} from '@cds/shared';
 import { PrismaService } from '../../comun/prisma/prisma.service.js';
 import { ConfiguracionNegocioService } from '../../comun/configuracion/configuracion-negocio.service.js';
-import { aBarberoPublico, aSedePublica, aServicioPublico } from './dto-publico.js';
+import { hoyLocal } from '../../comun/tiempo/tiempo.js';
+import { DisponibilidadService } from '../disponibilidad/disponibilidad.service.js';
+import { aBarberoPublico, aHuecoPublico, aSedePublica, aServicioPublico } from './dto-publico.js';
 
 /**
  * Los `select` piden solo las columnas que emite el mapeador correspondiente:
@@ -47,6 +58,7 @@ export class PublicoService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly configuracion: ConfiguracionNegocioService,
+    private readonly motorDisponibilidad: DisponibilidadService,
   ) {}
 
   // ---------------------------------------------------------------- Opciones
@@ -95,6 +107,114 @@ export class PublicoService {
       config: aConfigPublica(config),
     };
   }
+
+  // ----------------------------------------------------------- Disponibilidad
+
+  /**
+   * Huecos de un día. Sin barbero elegido devuelve la UNIÓN de los huecos de la
+   * sede: «hay sitio a las 10:00», sin decir de quién. La lista de qué barbero
+   * está libre a cada hora es su agenda personal y se reconstruye hueco por
+   * hueco si se publica; el barbero lo decide el servidor al crear la cita.
+   * Las reglas de antelación y anticipación las aplica `DisponibilidadService`.
+   */
+  async disponibilidad(
+    filtros: ConsultarDisponibilidadPublicaDto,
+  ): Promise<{ fecha: string; laborable: boolean; huecos: HuecoPublico[] }> {
+    const [visibles, dia] = await Promise.all([
+      this.prisma.usuario.findMany({
+        where: {
+          rol: 'BARBERO',
+          activo: true,
+          visibleWeb: true,
+          eliminadoEn: null,
+          OR: [{ sedeId: filtros.sedeId }, { sedesPermitidas: { some: { sedeId: filtros.sedeId } } }],
+        },
+        select: { id: true },
+      }),
+      this.motorDisponibilidad.delDia({
+        sedeId: filtros.sedeId,
+        barberoId: filtros.barberoId,
+        fecha: filtros.fecha,
+        servicioIds: filtros.servicioIds,
+        aplicarReglasCliente: true,
+      }),
+    ]);
+
+    // `delDia` devuelve a todos los barberos de la sede: aquí se descartan los
+    // que la web no debe mostrar, antes de que entren en la unión.
+    const idsVisibles = new Set(visibles.map((b: { id: string }) => b.id));
+    // Si el cliente eligió barbero, solo cuenta ese: se comprueba aquí también
+    // para no depender de que el motor filtre.
+    const barberos = dia.barberos.filter(
+      (b) => idsVisibles.has(b.barberoId) && (!filtros.barberoId || b.barberoId === filtros.barberoId),
+    );
+
+    // Una sede sin barberos visibles es un conjunto vacío, no un error.
+    const laborable = dia.laborable && barberos.some((b) => b.trabaja);
+    if (!laborable) return { fecha: filtros.fecha, laborable: false, huecos: [] };
+
+    return {
+      fecha: filtros.fecha,
+      laborable: true,
+      huecos: unirHuecos(barberos.map((b) => b.huecos)),
+    };
+  }
+
+  /**
+   * Qué días del rango tienen algún hueco. El rango se recorta a
+   * `maxDiasAnticipacion`: más allá de ese tope el cliente no puede reservar.
+   */
+  async calendario(filtros: ConsultarCalendarioPublicoDto): Promise<DiaCalendarioPublico[]> {
+    const config = await this.configuracion.obtener();
+    const tope = sumarDias(hoyLocal(config.zonaHoraria), config.maxDiasAnticipacion);
+    const hasta = filtros.hasta < tope ? filtros.hasta : tope;
+    if (filtros.desde > hasta) return [];
+
+    const dias = await this.motorDisponibilidad.calendario({
+      sedeId: filtros.sedeId,
+      desde: filtros.desde,
+      hasta,
+    });
+    return dias.map((dia) => ({ fecha: dia.fecha, hayHueco: dia.huecosLibres > 0 }));
+  }
+}
+
+/** Suma días a una fecha local `YYYY-MM-DD` sin pasar por la zona horaria. */
+function sumarDias(fecha: string, dias: number): string {
+  const resultado = new Date(`${fecha}T00:00:00Z`);
+  resultado.setUTCDate(resultado.getUTCDate() + dias);
+  return resultado.toISOString().slice(0, 10);
+}
+
+/**
+ * Unión de los huecos de varios barberos, un elemento por instante y en orden
+ * cronológico (no en el de los barberos, que delataría la agenda de cada uno).
+ *
+ * Disponible si lo está alguno. Si no lo está nadie, el motivo solo sobrevive
+ * cuando TODOS coinciden en `ANTELACION` o `NO_CABE`: mezclar motivos de varios
+ * barberos es una pista sobre sus agendas. `aHuecoPublico` hace el resto.
+ */
+function unirHuecos(listas: HuecoDisponible[][]): HuecoPublico[] {
+  const porInstante = new Map<string, HuecoDisponible[]>();
+  for (const hueco of listas.flat()) {
+    const grupo = porInstante.get(hueco.inicioEn) ?? [];
+    grupo.push(hueco);
+    porInstante.set(hueco.inicioEn, grupo);
+  }
+
+  return [...porInstante.values()]
+    .map((grupo): HuecoPublico => {
+      const primero = grupo[0]!;
+      const disponible = grupo.some((h) => h.disponible);
+      const motivosIguales = grupo.every((h) => h.motivo === primero.motivo);
+      return aHuecoPublico({
+        inicioEn: primero.inicioEn,
+        hora: primero.hora,
+        disponible,
+        motivo: !disponible && motivosIguales ? primero.motivo : undefined,
+      });
+    })
+    .sort((a, b) => new Date(a.inicioEn).getTime() - new Date(b.inicioEn).getTime());
 }
 
 /** Solo los seis campos que el frontend necesita para comportarse como la API. */
