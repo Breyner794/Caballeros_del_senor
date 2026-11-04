@@ -576,7 +576,10 @@ export class DisponibilidadService {
           : { horaInicio: horario.horaInicio, horaFin: horario.horaFin };
 
       let totalHuecos = 0;
+      // Modo normal: citas (en slots). Modo exacto: inicios que no se pueden
+      // ofrecer, sea cual sea el motivo. Por eso `reservas` lleva su propia cuenta.
       let huecosOcupados = 0;
+      let reservasExactas = 0;
 
       for (const agenda of agendas.filter((a) => a.diaSemana === diaSemana)) {
         const excepcion = excepciones.find(
@@ -640,6 +643,7 @@ export class DisponibilidadService {
               antelacion,
             });
             if (motivo !== undefined) huecosOcupados += 1;
+            if (motivo === 'OCUPADO') reservasExactas += 1;
           }
           continue;
         }
@@ -682,7 +686,7 @@ export class DisponibilidadService {
                 : 'libre',
         totalHuecos,
         huecosLibres,
-        reservas: huecosOcupados,
+        reservas: exacto ? reservasExactas : huecosOcupados,
         ...(especial ? { etiqueta: especial.nombre } : {}),
       });
     }

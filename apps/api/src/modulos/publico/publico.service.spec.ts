@@ -219,6 +219,9 @@ describe('PublicoService.disponibilidad', () => {
     });
 
   beforeEach(() => {
+    // Hoy es 2026-11-04 en Bogotá; con 45 días de anticipación el tope es 2026-12-19.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-04T15:00:00Z'));
     prisma = crearPrismaDoble();
     prisma.usuario.findMany.mockResolvedValue([{ id: 'bA' }, { id: 'bB' }]);
     disponibilidad = crearDisponibilidadDoble();
@@ -230,6 +233,35 @@ describe('PublicoService.disponibilidad', () => {
       crearConfiguracionDoble(configuracion()) as never,
       disponibilidad as never,
     );
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('una fecha pasada responde laborable false y huecos vacíos sin consultar al motor', async () => {
+    const respuesta = await servicio.disponibilidad({
+      sedeId: SEDE_A,
+      fecha: '2020-01-01',
+      servicioIds: [SERVICIO],
+    });
+    expect(respuesta).toEqual({ fecha: '2020-01-01', laborable: false, huecos: [] });
+    expect(disponibilidad.delDia).not.toHaveBeenCalled();
+  });
+
+  it('una fecha más allá de maxDiasAnticipacion responde vacío sin consultar al motor', async () => {
+    const respuesta = await servicio.disponibilidad({
+      sedeId: SEDE_A,
+      fecha: '2026-12-20',
+      servicioIds: [SERVICIO],
+    });
+    expect(respuesta).toEqual({ fecha: '2026-12-20', laborable: false, huecos: [] });
+    expect(disponibilidad.delDia).not.toHaveBeenCalled();
+  });
+
+  it('hoy y el último día permitido sí consultan al motor', async () => {
+    for (const fecha of ['2026-11-04', '2026-12-19']) {
+      await servicio.disponibilidad({ sedeId: SEDE_A, fecha, servicioIds: [SERVICIO] });
+    }
+    expect(disponibilidad.delDia).toHaveBeenCalledTimes(2);
   });
 
   it('pide la disponibilidad con las reglas del cliente activadas', async () => {

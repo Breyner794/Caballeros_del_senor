@@ -1289,6 +1289,28 @@ describe('DisponibilidadService.calendario con servicio, reglas del cliente y ba
 
     expect(dia!.huecosLibres).toBe(0);
     expect(dia!.estado).toBe('lleno');
+    // `reservas` son reservas: que no quepa el servicio no es una cita.
+    expect(dia!.reservas).toBe(0);
+  });
+
+  it('en modo exacto `reservas` cuenta solo citas, no descansos ni antelación', async () => {
+    const entorno = montar();
+    escenario(entorno, {
+      agendas: [
+        agendaDia({ bloques: [{ horaInicio: 720, horaFin: 780, tipo: 'ALMUERZO' }] }),
+      ],
+    });
+    // Una cita de 09:00 a 09:30 el otro martes.
+    entorno.prisma.reserva.findMany.mockResolvedValue([ocupacion(540, 570, OTRO_MARTES)]);
+
+    const [dia] = await entorno.servicio.calendario(
+      rangoDe(OTRO_MARTES, { servicioIds: [ID.servicioCorte] }),
+    );
+
+    expect(dia!.reservas).toBe(1);
+    // 20 inicios: 1 por la cita y 2 por el almuerzo no se ofrecen.
+    expect(dia!.totalHuecos).toBe(20);
+    expect(dia!.huecosLibres).toBe(17);
   });
 
   it('el mismo día sí tiene hueco para un servicio que cabe', async () => {

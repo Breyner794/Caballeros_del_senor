@@ -120,6 +120,13 @@ export class PublicoService {
   async disponibilidad(
     filtros: ConsultarDisponibilidadPublicaDto,
   ): Promise<{ fecha: string; laborable: boolean; huecos: HuecoPublico[] }> {
+    // `delDia` no acota la fecha (eso lo hace `validarHueco` al crear): se
+    // recorta aquí el rango de consulta, igual que en el calendario.
+    const { hoy, tope } = await this.ventanaDeReserva();
+    if (filtros.fecha < hoy || filtros.fecha > tope) {
+      return { fecha: filtros.fecha, laborable: false, huecos: [] };
+    }
+
     const [visibles, dia] = await Promise.all([
       this.prisma.usuario.findMany({
         where: {
@@ -165,11 +172,9 @@ export class PublicoService {
    * `maxDiasAnticipacion`: más allá de ese tope el cliente no puede reservar.
    */
   async calendario(filtros: ConsultarCalendarioPublicoDto): Promise<DiaCalendarioPublico[]> {
-    const config = await this.configuracion.obtener();
-    const tope = sumarDias(hoyLocal(config.zonaHoraria), config.maxDiasAnticipacion);
+    const { hoy, tope } = await this.ventanaDeReserva();
     const hasta = filtros.hasta < tope ? filtros.hasta : tope;
     // Un selector de fechas no ofrece días pasados.
-    const hoy = hoyLocal(config.zonaHoraria);
     const desde = filtros.desde > hoy ? filtros.desde : hoy;
     if (desde > hasta) return [];
 
@@ -184,6 +189,17 @@ export class PublicoService {
       soloVisiblesWeb: true,
     });
     return dias.map((dia) => ({ fecha: dia.fecha, hayHueco: dia.huecosLibres > 0 }));
+  }
+
+  /**
+   * Primer y último día en que el cliente puede reservar: hoy y hoy más
+   * `maxDiasAnticipacion`. `hoy` se calcula una sola vez para que, en el cruce
+   * de medianoche, ambos extremos salgan del mismo día.
+   */
+  private async ventanaDeReserva(): Promise<{ hoy: string; tope: string }> {
+    const config = await this.configuracion.obtener();
+    const hoy = hoyLocal(config.zonaHoraria);
+    return { hoy, tope: sumarDias(hoy, config.maxDiasAnticipacion) };
   }
 }
 
