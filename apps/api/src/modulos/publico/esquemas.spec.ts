@@ -1,4 +1,11 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, expectTypeOf, it } from 'vitest';
+import type {
+  EstadoReserva,
+  HuecoPublico,
+  MiReservaPublica,
+  ReservaPublica,
+  ServicioPublico,
+} from '@cds/shared';
 import {
   cancelarReservaPublicaSchema,
   clienteNuevoEnReservaSchema,
@@ -112,6 +119,33 @@ describe('consultas públicas', () => {
         servicioIds: ID.servicioCorte,
       }).success,
     ).toBe(false);
+  });
+});
+
+// Estas pruebas viven en el sistema de tipos: las comprueba `typecheck`.
+// Fijan lo que el cliente necesita y lo que no puede salir nunca.
+describe('tipos de respuesta pública', () => {
+  it('el motivo de un hueco solo admite los que el cliente puede conocer', () => {
+    expectTypeOf<NonNullable<HuecoPublico['motivo']>>().toEqualTypeOf<'ANTELACION' | 'NO_CABE'>();
+    // @ts-expect-error OCUPADO es un motivo interno: revelaría la agenda del barbero
+    const interno: HuecoPublico = { inicioEn: '', hora: '', disponible: false, motivo: 'OCUPADO' };
+    expect(interno).toBeDefined();
+  });
+
+  it('la reserva pública lleva el código, no el UUID, y el estado tipado', () => {
+    expectTypeOf<ReservaPublica['codigo']>().toEqualTypeOf<string>();
+    expectTypeOf<ReservaPublica['estado']>().toEqualTypeOf<EstadoReserva>();
+    expectTypeOf<ReservaPublica>().not.toHaveProperty('id');
+    expectTypeOf<HuecoPublico>().not.toHaveProperty('barberoIds');
+  });
+
+  it('el servicio público incluye la lista de lo que incluye', () => {
+    expectTypeOf<ServicioPublico['incluye']>().toEqualTypeOf<string[]>();
+  });
+
+  it('mi reserva separa poder cancelar de poder reprogramar', () => {
+    expectTypeOf<MiReservaPublica['puedeCancelar']>().toEqualTypeOf<boolean>();
+    expectTypeOf<MiReservaPublica['puedeReprogramar']>().toEqualTypeOf<boolean>();
   });
 });
 

@@ -9,6 +9,7 @@ import {
   textoOpcional,
   textoRequerido,
 } from './comunes.js';
+import type { EstadoReserva } from './reservas.js';
 
 /**
  * Esquemas del canal público (la web de reservas que usa el cliente final).
@@ -92,50 +93,34 @@ export const consultarCalendarioPublicoSchema = z
 export type ConsultarCalendarioPublicoDto = z.infer<typeof consultarCalendarioPublicoSchema>;
 
 // ============================ RESPUESTAS ====================================
-// Solo lo que el cliente final puede ver: nada de costos, notas internas,
-// teléfonos de otros clientes ni identificadores que no necesite.
+// Solo lo que el cliente final puede ver. La ausencia de un campo es una
+// decisión de seguridad, no un olvido: ni el UUID interno de la reserva, ni
+// qué barbero está libre en cada hueco, ni el alias frente al nombre real.
 
 export interface SedePublica {
   id: string;
   nombre: string;
   direccion: string | null;
   ciudad: string | null;
-  zonaHoraria: string;
+  telefono: string | null;
+  mapsUrl: string | null;
 }
 
 export interface ServicioPublico {
   id: string;
   nombre: string;
   descripcion: string | null;
-  duracionMinutos: number;
+  incluye: string[];
   precio: number;
+  duracionMinutos: number;
 }
 
 export interface BarberoPublico {
   id: string;
+  /** Ya resuelto como `alias ?? nombre`: el nombre real no sale si hay alias. */
   nombre: string;
-  alias: string | null;
+  bio: string | null;
   fotoUrl: string | null;
-}
-
-/** Todo lo que el formulario necesita para arrancar, en una sola petición. */
-export interface OpcionesPublicas {
-  sedes: SedePublica[];
-  servicios: ServicioPublico[];
-  barberos: BarberoPublico[];
-}
-
-export interface ReservaPublica {
-  id: string;
-  estado: string;
-  inicioEn: string;
-  finEn: string;
-  sede: SedePublica;
-  barbero: BarberoPublico;
-  servicios: ServicioPublico[];
-  total: number;
-  /** Si todavía se puede cancelar o mover, según la antelación mínima. */
-  modificable: boolean;
 }
 
 export interface HuecoPublico {
@@ -143,12 +128,52 @@ export interface HuecoPublico {
   inicioEn: string;
   /** "09:30", ya en la zona horaria del negocio. */
   hora: string;
-  /** Barberos libres en ese hueco: permite elegir sin exponer la agenda. */
-  barberoIds: string[];
+  disponible: boolean;
+  /**
+   * Solo los motivos que el cliente puede conocer. Los internos (OCUPADO,
+   * ALMUERZO, DESCANSO) no son representables a propósito: el tipo impide
+   * la fuga, no solo la convención. La unión de huecos no dice de quién es cada uno.
+   */
+  motivo?: 'ANTELACION' | 'NO_CABE';
 }
 
 export interface DiaCalendarioPublico {
   fecha: string;
-  /** Hay al menos un hueco libre para los servicios elegidos. */
-  disponible: boolean;
+  hayHueco: boolean;
+}
+
+/** El cliente identifica su cita por `codigo` (CDS-7F3K2M); el UUID no sale del panel. */
+export interface ReservaPublica {
+  codigo: string;
+  estado: EstadoReserva;
+  inicioEn: string;
+  finEn: string;
+  sede: SedePublica;
+  barbero: BarberoPublico;
+  servicios: ServicioPublico[];
+  total: number;
+}
+
+/** Cancelar y reprogramar dependen de dos límites distintos de la configuración. */
+export type MiReservaPublica = ReservaPublica & {
+  puedeCancelar: boolean;
+  puedeReprogramar: boolean;
+};
+
+export interface ConfigPublica {
+  permiteElegirBarbero: boolean;
+  maxDiasAnticipacion: number;
+  minAntelacionMinutos: number;
+  zonaHoraria: string;
+  moneda: string;
+  nombreNegocio: string;
+}
+
+export type SedeConBarberos = SedePublica & { barberos: BarberoPublico[] };
+
+/** Todo lo que el formulario necesita para arrancar, en una sola petición. */
+export interface OpcionesPublicas {
+  sedes: SedeConBarberos[];
+  servicios: ServicioPublico[];
+  config: ConfigPublica;
 }
