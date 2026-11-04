@@ -115,6 +115,18 @@ export interface ServicioPublico {
   duracionMinutos: number;
 }
 
+/**
+ * Lo que el cliente reservó, congelado al reservar (`ReservaServicio`). Sin
+ * descripción ni «incluye»: no se guardaron entonces y el catálogo de hoy ya
+ * no es el de aquel día. Tampoco se une al catálogo vivo: mostraría el precio
+ * de hoy en una cita pasada.
+ */
+export interface ServicioReservado {
+  nombre: string;
+  precio: number;
+  duracionMinutos: number;
+}
+
 export interface BarberoPublico {
   id: string;
   /** Ya resuelto como `alias ?? nombre`: el nombre real no sale si hay alias. */
@@ -150,7 +162,7 @@ export interface ReservaPublica {
   finEn: string;
   sede: SedePublica;
   barbero: BarberoPublico;
-  servicios: ServicioPublico[];
+  servicios: ServicioReservado[];
   total: number;
 }
 

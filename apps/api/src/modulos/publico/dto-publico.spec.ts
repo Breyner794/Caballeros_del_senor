@@ -1,13 +1,14 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import { Prisma } from '@prisma/client';
-import type { BarberoPublico, HuecoPublico } from '@cds/shared';
-import { ID, ZONA, reserva, servicio } from '../../../test/soporte/datos.js';
+import type { BarberoPublico, HuecoPublico, ReservaPublica, ServicioReservado } from '@cds/shared';
+import { ID, lineaServicio, reserva, servicio } from '../../../test/soporte/datos.js';
 import {
   aBarberoPublico,
   aHuecoPublico,
   aReservaPublica,
   aSedePublica,
   aServicioPublico,
+  aServicioReservado,
 } from './dto-publico.js';
 
 const ordenadas = (objeto: object) => Object.keys(objeto).sort();
@@ -35,7 +36,7 @@ const hueco = (cambios: Record<string, unknown> = {}) => ({
 
 describe('aReservaPublica', () => {
   it('la reserva pública tiene exactamente estas claves', () => {
-    expect(ordenadas(aReservaPublica(reserva(), ZONA))).toEqual([
+    expect(ordenadas(aReservaPublica(reserva()))).toEqual([
       'barbero', 'codigo', 'estado', 'finEn', 'inicioEn', 'sede', 'servicios', 'total',
     ]);
   });
@@ -44,7 +45,6 @@ describe('aReservaPublica', () => {
     const salida = JSON.stringify(
       aReservaPublica(
         reserva({ notaInterna: 'cliente conflictivo', notaCliente: 'más corto' }),
-        ZONA,
       ),
     );
     for (const secreto of [ID.reserva, 'tok_123', 'conflictivo', 'Juan', '+573001234567']) {
@@ -53,7 +53,7 @@ describe('aReservaPublica', () => {
   });
 
   it('serializa instantes en ISO y el total como número', () => {
-    const salida = aReservaPublica(reserva(), ZONA);
+    const salida = aReservaPublica(reserva());
     expect(salida.inicioEn).toBe('2026-03-11T15:00:00.000Z');
     expect(salida.finEn).toBe('2026-03-11T15:30:00.000Z');
     expect(salida.total).toBe(30000);
@@ -61,16 +61,14 @@ describe('aReservaPublica', () => {
     expect(salida.estado).toBe('CONFIRMADA');
   });
 
-  it('las líneas salen como servicios públicos de claves exactas', () => {
-    const [linea] = aReservaPublica(reserva(), ZONA).servicios;
-    expect(ordenadas(linea!)).toEqual([
-      'descripcion', 'duracionMinutos', 'id', 'incluye', 'nombre', 'precio',
-    ]);
+  it('las líneas salen como servicios reservados, sin descripción ni incluye', () => {
+    const [linea] = aReservaPublica(reserva()).servicios;
+    expect(ordenadas(linea!)).toEqual(['duracionMinutos', 'nombre', 'precio']);
     expect(linea).toMatchObject({ nombre: 'Corte clásico', precio: 30000, duracionMinutos: 30 });
   });
 
   it('el barbero de la reserva sale con alias y sin datos internos', () => {
-    const { barbero, sede } = aReservaPublica(reserva(), ZONA);
+    const { barbero, sede } = aReservaPublica(reserva());
     expect(barbero.nombre).toBe('Andy');
     expect(ordenadas(barbero)).toEqual(['bio', 'fotoUrl', 'id', 'nombre']);
     expect(ordenadas(sede)).toEqual(['ciudad', 'direccion', 'id', 'mapsUrl', 'nombre', 'telefono']);
@@ -91,6 +89,21 @@ describe('aServicioPublico', () => {
     expect(salida.precio).toBe(45000.5);
     expect(salida.descripcion).toBeNull();
     expect(salida.incluye).toEqual([]);
+  });
+});
+
+describe('aServicioReservado', () => {
+  it('el servicio reservado tiene exactamente estas claves', () => {
+    expect(ordenadas(aServicioReservado(lineaServicio()))).toEqual([
+      'duracionMinutos', 'nombre', 'precio',
+    ]);
+  });
+
+  it('usa el snapshot congelado, no datos vivos del catálogo', () => {
+    const salida = aServicioReservado(
+      lineaServicio({ nombreSnapshot: 'Corte viejo', precioSnapshot: new Prisma.Decimal(25000) }),
+    );
+    expect(salida).toEqual({ nombre: 'Corte viejo', precio: 25000, duracionMinutos: 30 });
   });
 });
 
@@ -147,6 +160,11 @@ describe('aHuecoPublico', () => {
     expect(aHuecoPublico(hueco({ motivo: 'NO_CABE' })).motivo).toBe('NO_CABE');
   });
 
+  it('PASADO, motivo interno de la disponibilidad, no sale', () => {
+    const salida = aHuecoPublico(hueco({ motivo: 'PASADO' }));
+    expect(salida).toEqual({ inicioEn: '2026-03-11T14:30:00.000Z', hora: '09:30', disponible: false });
+  });
+
   it('un hueco libre sale con claves exactas y sin motivo', () => {
     expect(ordenadas(aHuecoPublico(hueco({ disponible: true })))).toEqual([
       'disponible', 'hora', 'inicioEn',
@@ -160,6 +178,11 @@ describe('contrato de tipos', () => {
     // @ts-expect-error OCUPADO no puede salir al público
     const _fuga: HuecoPublico = { inicioEn: '', hora: '', disponible: false, motivo: 'OCUPADO' };
     void _fuga;
+  });
+
+  it('la reserva pública lista servicios reservados, no del catálogo', () => {
+    expectTypeOf<ReservaPublica['servicios']>().toEqualTypeOf<ServicioReservado[]>();
+    expectTypeOf<keyof ServicioReservado>().toEqualTypeOf<'nombre' | 'precio' | 'duracionMinutos'>();
   });
 
   it('el barbero público no tiene campo alias', () => {

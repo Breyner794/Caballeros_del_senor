@@ -5,6 +5,7 @@ import type {
   ReservaPublica,
   SedePublica,
   ServicioPublico,
+  ServicioReservado,
 } from '@cds/shared';
 
 /**
@@ -63,17 +64,11 @@ export interface HuecoEntrada {
   motivo?: string;
 }
 
-/**
- * Línea congelada de la reserva. El nombre, precio y duración son los de
- * cuando se reservó; la descripción y lo que incluye vienen del catálogo y
- * pueden faltar si la consulta no los trajo.
- */
+/** Línea congelada de la reserva: nombre, precio y duración de cuando se reservó. */
 export interface LineaReservaEntrada {
-  servicioId: string;
   nombreSnapshot: string;
   precioSnapshot: Numerico;
   duracionSnapshot: number;
-  servicio?: { descripcion?: string | null; incluye?: string[] | null } | null;
 }
 
 export interface ReservaEntrada {
@@ -134,11 +129,17 @@ export function aHuecoPublico(hueco: HuecoEntrada): HuecoPublico {
   };
 }
 
-/**
- * `zona` queda en la firma por contrato con los llamadores; los instantes
- * viajan en ISO (UTC) y el cliente los formatea en la zona del negocio.
- */
-export function aReservaPublica(reserva: ReservaEntrada, _zona: string): ReservaPublica {
+/** Sobre el snapshot, nunca sobre el catálogo vivo: el precio es el de la fecha de la reserva. */
+export function aServicioReservado(linea: LineaReservaEntrada): ServicioReservado {
+  return {
+    nombre: linea.nombreSnapshot,
+    precio: aNumero(linea.precioSnapshot),
+    duracionMinutos: linea.duracionSnapshot,
+  };
+}
+
+/** Los instantes salen en ISO UTC; el formateo a hora local es del navegador. */
+export function aReservaPublica(reserva: ReservaEntrada): ReservaPublica {
   return {
     codigo: reserva.codigo,
     estado: reserva.estado as EstadoReserva,
@@ -146,16 +147,7 @@ export function aReservaPublica(reserva: ReservaEntrada, _zona: string): Reserva
     finEn: reserva.finEn.toISOString(),
     sede: aSedePublica(reserva.sede),
     barbero: aBarberoPublico(reserva.barbero),
-    servicios: reserva.servicios.map((linea) =>
-      aServicioPublico({
-        id: linea.servicioId,
-        nombre: linea.nombreSnapshot,
-        descripcion: linea.servicio?.descripcion,
-        incluye: linea.servicio?.incluye,
-        precio: linea.precioSnapshot,
-        duracionMinutos: linea.duracionSnapshot,
-      }),
-    ),
+    servicios: reserva.servicios.map(aServicioReservado),
     total: aNumero(reserva.total),
   };
 }
