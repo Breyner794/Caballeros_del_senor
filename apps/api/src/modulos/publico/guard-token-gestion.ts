@@ -10,12 +10,17 @@ export const CABECERA_TOKEN_GESTION = 'x-token-gestion';
 /** La columna es `VarChar(64)`: un token más largo no puede existir. */
 const LONGITUD_MAXIMA_TOKEN = 64;
 
-/** Reserva resuelta por el guard, tal como la devuelve Prisma. */
-export type ReservaPublica = NonNullable<
+/**
+ * Reserva resuelta por el guard a partir del token: la fila interna completa,
+ * que incluye `tokenGestion`, la nota interna y la ficha del cliente. Nunca se
+ * devuelve tal cual: para responder se pasa siempre por los mapeadores de
+ * `dto-publico.ts`.
+ */
+export type ReservaResuelta = NonNullable<
   Awaited<ReturnType<PrismaService['reserva']['findUnique']>>
 >;
 
-type PeticionConReserva = Request & { reservaPublica?: ReservaPublica };
+type PeticionConReserva = Request & { reservaPublica?: ReservaResuelta };
 
 /**
  * Autenticación del canal público por token de gestión.
@@ -60,7 +65,7 @@ export class GuardTokenGestion implements CanActivate {
   }
 }
 
-/** Inyecta la reserva resuelta por el guard: `@ReservaPorToken() reserva: ReservaPublica` */
+/** Inyecta la reserva resuelta por el guard: `@ReservaPorToken() reserva: ReservaResuelta` */
 export const ReservaPorToken = createParamDecorator((_: unknown, ctx: ExecutionContext) => {
   return ctx.switchToHttp().getRequest<PeticionConReserva>().reservaPublica;
 });
