@@ -3,6 +3,7 @@ import {
   arrayDeQuery,
   booleanoDeQuery,
   dineroSchema,
+  emailOpcionalSchema,
   fechaSchema,
   fechaHoraSchema,
   idSchema,
@@ -80,6 +81,8 @@ export const ETIQUETAS_ESTADO: Record<EstadoReserva, string> = {
 export const clienteNuevoEnReservaSchema = z.object({
   nombreCompleto: textoRequerido('El nombre del cliente', 160),
   telefono: telefonoSchema,
+  /** Opcional: los avisos por correo del canal público lo usan si está. */
+  email: emailOpcionalSchema.optional(),
   notas: textoOpcional(2000),
 });
 

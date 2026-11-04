@@ -12,3 +12,4 @@ export * from './validaciones/auth.js';
 export * from './validaciones/catalogo.js';
 export * from './validaciones/reservas.js';
 export * from './validaciones/agenda.js';
+export * from './validaciones/publico.js';
