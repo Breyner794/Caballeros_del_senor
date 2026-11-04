@@ -85,6 +85,7 @@ export class ReservasService {
     await this.verificarBarberoEnSede(datos.barberoId, datos.sedeId);
 
     const servicios = await this.resolverServicios(datos.servicioIds);
+    this.verificarDescuento(datos.descuento, servicios.subtotal);
 
     await this.disponibilidad.validarHueco({
       sedeId: datos.sedeId,
@@ -153,6 +154,7 @@ export class ReservasService {
 
     await this.verificarBarberoEnSede(datos.barberoId, datos.sedeId);
     const servicios = await this.resolverServicios(datos.servicioIds);
+    this.verificarDescuento(datos.descuento, servicios.subtotal);
 
     let inicioEn: Date;
     if (datos.inicioEn) {
@@ -559,6 +561,14 @@ export class ReservasService {
       });
     }
 
+    // El descuento del cobro se valida antes de abrir la transacción: así la
+    // recepción ve el error en el campo, y no un fallo a medio camino entre el
+    // canje de sellos y la venta.
+    this.verificarDescuento(
+      datos.descuento ?? reserva.descuento,
+      new Prisma.Decimal(reserva.subtotal),
+    );
+
     const aplicarPremio = datos.aplicarPremioFidelidad;
 
     if (aplicarPremio) {
@@ -828,6 +838,10 @@ export class ReservasService {
     const finConBufferEn = new Date(finEn.getTime() + datos.servicios.bufferMinutos * 60_000);
 
     const descuento = new Prisma.Decimal(datos.descuento ?? 0);
+    // Punto de paso obligado: quien llame mañana a `insertarReserva` sin haber
+    // validado antes tampoco podrá escribir un descuento imposible.
+    this.verificarDescuento(descuento, datos.servicios.subtotal);
+
     const total = Prisma.Decimal.max(
       new Prisma.Decimal(0),
       datos.servicios.subtotal.minus(descuento),
@@ -866,6 +880,38 @@ export class ReservasService {
         },
       },
     });
+  }
+
+  /**
+   * El descuento no puede pasar del importe de la cita.
+   *
+   * La base de datos ya lo exige (`reservas_importes_no_negativos` incluye
+   * `descuento <= subtotal`), pero acotar solo el total con `Decimal.max(0, …)`
+   * no basta: el `descuento` se guardaba tal cual, así que un descuento de
+   * 90 000 sobre una cita de 30 000 hacía fallar el `INSERT`. El filtro global
+   * no traducía las violaciones de CHECK, de modo que la recepción veía
+   * "Ocurrió un error inesperado" y la cita se quedaba sin cobrar.
+   *
+   * Se rechaza en lugar de recortar en silencio a propósito: si alguien teclea
+   * 90 000 donde quería 9 000, recortar al subtotal daría la cita por gratis y
+   * nadie se enteraría hasta el cierre de caja. El error va al campo, con el
+   * máximo aplicable en el mensaje.
+   */
+  private verificarDescuento(
+    descuento: Prisma.Decimal | number | null | undefined,
+    subtotal: Prisma.Decimal,
+  ): void {
+    const valor = new Prisma.Decimal(descuento ?? 0);
+    if (valor.lessThanOrEqualTo(subtotal)) return;
+
+    throw ErrorNegocio.validacion(
+      {
+        descuento: [
+          `El descuento no puede pasar de ${this.pesos(subtotal)}, que es lo que suman los servicios de la cita.`,
+        ],
+      },
+      `El descuento (${this.pesos(valor)}) es mayor que el importe de la cita (${this.pesos(subtotal)}).`,
+    );
   }
 
   private async verificarBarberoEnSede(barberoId: string, sedeId: string): Promise<void> {

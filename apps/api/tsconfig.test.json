@@ -1,0 +1,20 @@
+{
+  // Comprobación de tipos de las pruebas, aparte del tsconfig de la API.
+  //
+  // No se pueden meter en el `include` principal: ese tsconfig compila a
+  // CommonJS, y en cuanto los archivos de `test/` quedan bajo su alcance,
+  // esbuild los transforma a CJS y Vitest deja de poder importarse
+  // ("Vitest cannot be imported in a CommonJS module using require()"). Las
+  // pruebas corren como ESM, así que se declaran como tal aquí y solo para
+  // `tsc --noEmit`.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "incremental": false,
+    "types": ["node"]
+  },
+  "include": ["test/**/*", "src/**/*.spec.ts", "vitest.config.ts", "vitest.integracion.config.ts"],
+  "exclude": ["node_modules", "dist"]
+}

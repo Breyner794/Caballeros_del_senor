@@ -202,6 +202,21 @@ export class FiltroGlobalExcepciones implements ExceptionFilter {
       };
     }
 
+    // Segunda red del descuento mayor que el subtotal. `ReservasService` ya lo
+    // rechaza con un error de campo, así que llegar hasta aquí significa que
+    // alguna ruta se saltó esa validación: se devuelve algo accionable al
+    // usuario y, a diferencia de los casos anteriores, se registra — es un
+    // hueco nuestro, no un conflicto legítimo.
+    if (PrismaService.esViolacionDe(error, 'reservas_importes_no_negativos')) {
+      return {
+        status: HttpStatus.UNPROCESSABLE_ENTITY,
+        codigo: CODIGOS_ERROR.VALIDACION,
+        mensaje: 'El descuento no puede ser mayor que el importe de la cita.',
+        campos: { descuento: ['Revisa el descuento: no puede pasar del total de la cita.'] },
+        registrar: true,
+      };
+    }
+
     if (!(error instanceof Prisma.PrismaClientKnownRequestError)) return null;
 
     switch (error.code) {
