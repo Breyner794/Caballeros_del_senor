@@ -1,7 +1,7 @@
 import { HttpStatus, Logger, type ExecutionContext } from '@nestjs/common';
 import type { ConfigService } from '@nestjs/config';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { CODIGOS_ERROR } from '@cds/shared';
+import { CODIGOS_ERROR, MAX_TOKEN_TURNSTILE } from '@cds/shared';
 import { GuardTurnstile } from './guard-turnstile.js';
 
 const URL_VERIFICACION = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
@@ -73,7 +73,7 @@ describe('GuardTurnstile', () => {
     ['falta el campo', {}],
     ['no es texto', { tokenTurnstile: 123 }],
     ['está vacío', { tokenTurnstile: '   ' }],
-    ['excede los 2048 caracteres', { tokenTurnstile: 'a'.repeat(2049) }],
+    ['excede el máximo de Turnstile', { tokenTurnstile: 'a'.repeat(MAX_TOKEN_TURNSTILE + 1) }],
   ])('rechaza sin consultar a Cloudflare cuando el token %s', async (_caso, cuerpo) => {
     await expect(guard.canActivate(contexto(cuerpo))).rejects.toMatchObject({
       codigo: CODIGOS_ERROR.VALIDACION,
@@ -88,6 +88,22 @@ describe('GuardTurnstile', () => {
       codigo: CODIGOS_ERROR.SERVICIO_EXTERNO_CAIDO,
       status: HttpStatus.BAD_GATEWAY,
     });
+  });
+
+  it('un aborto por tiempo agotado también falla cerrado con SERVICIO_EXTERNO_CAIDO', async () => {
+    // Lo que lanza fetch cuando AbortSignal.timeout se dispara; sin esperar 5 s reales.
+    fetchDoble.mockRejectedValue(new DOMException('The operation was aborted due to timeout', 'AbortError'));
+    await expect(guard.canActivate(contexto())).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.SERVICIO_EXTERNO_CAIDO,
+      status: HttpStatus.BAD_GATEWAY,
+    });
+  });
+
+  it('acepta un token del largo máximo', async () => {
+    fetchDoble.mockResolvedValue(respuestaCloudflare({ success: true }));
+    await expect(
+      guard.canActivate(contexto({ tokenTurnstile: 'a'.repeat(MAX_TOKEN_TURNSTILE) })),
+    ).resolves.toBe(true);
   });
 
   it('falla cerrado si Cloudflare responde con un error HTTP', async () => {

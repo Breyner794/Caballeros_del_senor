@@ -26,6 +26,9 @@ const servicioIdsSchema = z
   .min(1, 'Elige al menos un servicio')
   .max(6, 'Demasiados servicios en una sola cita');
 
+/** Largo máximo de un token de Turnstile, el documentado por Cloudflare. */
+export const MAX_TOKEN_TURNSTILE = 2048;
+
 /**
  * Prueba anti-bots de Cloudflare Turnstile. El token lo emite Turnstile en el navegador
  * y la API lo verifica contra Cloudflare; aquí solo se exige que venga.
@@ -33,7 +36,7 @@ const servicioIdsSchema = z
 const tokenTurnstileSchema = z
   .string({ required_error: 'Falta la verificación anti-bots' })
   .min(1, 'Falta la verificación anti-bots')
-  .max(4096, 'Verificación anti-bots no válida');
+  .max(MAX_TOKEN_TURNSTILE, 'Verificación anti-bots no válida');
 
 // ========================== ESCRITURA =======================================
 

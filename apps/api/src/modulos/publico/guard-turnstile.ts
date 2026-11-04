@@ -1,16 +1,13 @@
 import { CanActivate, ExecutionContext, HttpStatus, Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
-import { CODIGOS_ERROR, MENSAJES_ERROR } from '@cds/shared';
+import { CODIGOS_ERROR, MAX_TOKEN_TURNSTILE, MENSAJES_ERROR } from '@cds/shared';
 import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
 
 const URL_VERIFICACION = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 
 /** Sin tope, un Cloudflare lento dejaría la petición colgada indefinidamente. */
 const TIEMPO_MAXIMO_MS = 5_000;
-
-/** Longitud máxima que documenta Cloudflare para un token de Turnstile. */
-const LONGITUD_MAXIMA_TOKEN = 2048;
 
 /** Campo del cuerpo donde el frontend manda el token del widget. */
 const CAMPO_TOKEN = 'tokenTurnstile';
@@ -62,7 +59,7 @@ export class GuardTurnstile implements CanActivate {
     const valor = (cuerpo as Record<string, unknown>)[CAMPO_TOKEN];
     if (typeof valor !== 'string') return null;
     const token = valor.trim();
-    if (!token || token.length > LONGITUD_MAXIMA_TOKEN) return null;
+    if (!token || token.length > MAX_TOKEN_TURNSTILE) return null;
     return token;
   }
 
