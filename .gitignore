@@ -11,3 +11,7 @@ coverage/
 apps/*/dist/
 apps/api/generated/
 pgdata/
+
+# Espacio de trabajo de los planes de superpowers: artefactos de proceso,
+# no codigo del proyecto.
+.superpowers/
