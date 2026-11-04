@@ -78,7 +78,9 @@ async function arrancar(): Promise<void> {
     origin: origenes,
     credentials: true,
     methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id'],
+    // `x-token-gestion` lo envía la web pública al gestionar su cita; sin
+    // listarlo, el navegador rechaza la petición en el preflight.
+    allowedHeaders: ['Content-Type', 'Authorization', 'x-request-id', 'x-token-gestion'],
     exposedHeaders: ['x-request-id'],
     maxAge: 86_400,
   });

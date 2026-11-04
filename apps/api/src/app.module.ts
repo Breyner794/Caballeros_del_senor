@@ -25,6 +25,7 @@ import { ConfiguracionModule } from './modulos/configuracion/configuracion.modul
 import { AuditoriaConsultaModule } from './modulos/auditoria/auditoria.module.js';
 import { InventarioModule } from './modulos/inventario/inventario.module.js';
 import { ContabilidadModule } from './modulos/contabilidad/contabilidad.module.js';
+import { PublicoModule } from './modulos/publico/publico.module.js';
 import { SaludController } from './comun/salud/salud.controller.js';
 
 @Module({
@@ -70,6 +71,7 @@ import { SaludController } from './comun/salud/salud.controller.js';
     AuditoriaConsultaModule,
     InventarioModule,
     ContabilidadModule,
+    PublicoModule,
   ],
   controllers: [SaludController],
   providers: [
