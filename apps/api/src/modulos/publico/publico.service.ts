@@ -168,12 +168,20 @@ export class PublicoService {
     const config = await this.configuracion.obtener();
     const tope = sumarDias(hoyLocal(config.zonaHoraria), config.maxDiasAnticipacion);
     const hasta = filtros.hasta < tope ? filtros.hasta : tope;
-    if (filtros.desde > hasta) return [];
+    // Un selector de fechas no ofrece días pasados.
+    const hoy = hoyLocal(config.zonaHoraria);
+    const desde = filtros.desde > hoy ? filtros.desde : hoy;
+    if (desde > hasta) return [];
 
+    // Mismas reglas que el detalle del día: duración elegida, antelación
+    // mínima y solo barberos visibles, para que un día encendido tenga horas.
     const dias = await this.motorDisponibilidad.calendario({
       sedeId: filtros.sedeId,
-      desde: filtros.desde,
+      desde,
       hasta,
+      servicioIds: filtros.servicioIds,
+      aplicarReglasCliente: true,
+      soloVisiblesWeb: true,
     });
     return dias.map((dia) => ({ fecha: dia.fecha, hayHueco: dia.huecosLibres > 0 }));
   }
@@ -195,6 +203,10 @@ function sumarDias(fecha: string, dias: number): string {
  * barberos es una pista sobre sus agendas. `aHuecoPublico` hace el resto.
  */
 function unirHuecos(listas: HuecoDisponible[][]): HuecoPublico[] {
+  // Un instante que solo existe en la jornada de un barbero (p. ej. el último
+  // de la tarde) aparece en la unión, y es a propósito: ocultarlo escondería
+  // huecos reservables de verdad. Lo que revela es el horario de apertura de la
+  // barbería, no la agenda personal de nadie.
   const porInstante = new Map<string, HuecoDisponible[]>();
   for (const hueco of listas.flat()) {
     const grupo = porInstante.get(hueco.inicioEn) ?? [];

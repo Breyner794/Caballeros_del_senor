@@ -1248,3 +1248,126 @@ describe('DisponibilidadService: coherencia entre el día y el mes', () => {
     expect(servicio().precio).toBeInstanceOf(Prisma.Decimal);
   });
 });
+
+// ============================================================================
+//  CALENDARIO FIEL (canal público): parámetros opcionales y aditivos
+// ============================================================================
+
+describe('DisponibilidadService.calendario con servicio, reglas del cliente y barberos visibles', () => {
+  const OTRO_MARTES = '2026-03-17';
+
+  function escenario(
+    entorno: Entorno,
+    opciones: { agendas?: Record<string, unknown>[]; duracion?: number } = {},
+  ): void {
+    entorno.prisma.diaEspecial.findMany.mockResolvedValue([]);
+    entorno.prisma.sedeHorario.findMany.mockResolvedValue([horarioSede()]);
+    entorno.prisma.agendaDia.findMany.mockResolvedValue(opciones.agendas ?? [agendaDia()]);
+    entorno.prisma.agendaExcepcion.findMany.mockResolvedValue([]);
+    entorno.prisma.reserva.findMany.mockResolvedValue([]);
+    entorno.prisma.sede.findFirst.mockResolvedValue({ id: ID.sede });
+    entorno.prisma.servicio.findMany.mockResolvedValue([
+      { id: ID.servicioCorte, duracionMinutos: opciones.duracion ?? 30, bufferMinutos: null },
+    ]);
+  }
+
+  const rangoDe = (fecha: string, extra: Record<string, unknown> = {}) => ({
+    sedeId: ID.sede,
+    desde: fecha,
+    hasta: fecha,
+    ...extra,
+  });
+
+  it('un día cuyos huecos son más cortos que el servicio pedido no tiene hueco', async () => {
+    const entorno = montar();
+    // Jornada de 30 minutos: cabe un corte de 30, no uno de 45.
+    escenario(entorno, { agendas: [agendaDia({ horaInicio: 480, horaFin: 510 })], duracion: 45 });
+
+    const [dia] = await entorno.servicio.calendario(
+      rangoDe(OTRO_MARTES, { servicioIds: [ID.servicioCorte] }),
+    );
+
+    expect(dia!.huecosLibres).toBe(0);
+    expect(dia!.estado).toBe('lleno');
+  });
+
+  it('el mismo día sí tiene hueco para un servicio que cabe', async () => {
+    const entorno = montar();
+    escenario(entorno, { agendas: [agendaDia({ horaInicio: 480, horaFin: 510 })], duracion: 30 });
+
+    const [dia] = await entorno.servicio.calendario(
+      rangoDe(OTRO_MARTES, { servicioIds: [ID.servicioCorte] }),
+    );
+
+    expect(dia!.huecosLibres).toBe(1);
+  });
+
+  it('hoy, con todo lo que queda dentro de la antelación mínima, no tiene hueco', async () => {
+    const entorno = montar({ minAntelacionMinutos: 60 });
+    // Son las 08:00: la jornada 08:00-09:00 queda entera dentro de la antelación.
+    escenario(entorno, { agendas: [agendaDia({ horaInicio: 480, horaFin: 540 })] });
+
+    const [dia] = await entorno.servicio.calendario(
+      rangoDe(FECHA, { servicioIds: [ID.servicioCorte], aplicarReglasCliente: true }),
+    );
+
+    expect(dia!.huecosLibres).toBe(0);
+  });
+
+  it('sin las reglas del cliente ese mismo hoy sí tiene hueco', async () => {
+    const entorno = montar({ minAntelacionMinutos: 60 });
+    escenario(entorno, { agendas: [agendaDia({ horaInicio: 480, horaFin: 540 })] });
+
+    const [dia] = await entorno.servicio.calendario(
+      rangoDe(FECHA, { servicioIds: [ID.servicioCorte] }),
+    );
+
+    expect(dia!.huecosLibres).toBe(2);
+  });
+
+  it('con soloVisiblesWeb pide a Prisma solo barberos visibles en web', async () => {
+    const entorno = montar();
+    escenario(entorno);
+
+    await entorno.servicio.calendario(rangoDe(OTRO_MARTES, { soloVisiblesWeb: true }));
+
+    expect(entorno.prisma.agendaDia.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          usuario: { activo: true, eliminadoEn: null, rol: 'BARBERO', visibleWeb: true },
+        }),
+      }),
+    );
+  });
+
+  it('por defecto no filtra por visibilidad: el panel sigue viendo a todos', async () => {
+    const entorno = montar();
+    escenario(entorno);
+
+    await entorno.servicio.calendario(rangoDe(OTRO_MARTES));
+
+    expect(entorno.prisma.agendaDia.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          usuario: { activo: true, eliminadoEn: null, rol: 'BARBERO' },
+        }),
+      }),
+    );
+  });
+
+  it('el modo exacto no hace una consulta por día', async () => {
+    const entorno = montar();
+    escenario(entorno);
+
+    await entorno.servicio.calendario({
+      sedeId: ID.sede,
+      desde: OTRO_MARTES,
+      hasta: '2026-03-31',
+      servicioIds: [ID.servicioCorte],
+      aplicarReglasCliente: true,
+    });
+
+    expect(entorno.prisma.reserva.findMany).toHaveBeenCalledTimes(1);
+    expect(entorno.prisma.agendaDia.findMany).toHaveBeenCalledTimes(1);
+  });
+});

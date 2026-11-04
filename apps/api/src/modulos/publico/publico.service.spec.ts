@@ -420,6 +420,30 @@ describe('PublicoService.calendario', () => {
     );
   });
 
+  it('pide el calendario con la duración elegida, las reglas del cliente y solo barberos visibles', async () => {
+    await consultar('2026-11-10', '2026-11-11');
+    expect(disponibilidad.calendario).toHaveBeenCalledWith(
+      expect.objectContaining({
+        servicioIds: [SERVICIO],
+        aplicarReglasCliente: true,
+        soloVisiblesWeb: true,
+      }),
+    );
+  });
+
+  it('recorta desde a hoy: no ofrece días pasados', async () => {
+    await consultar('2026-10-01', '2026-11-11');
+    expect(disponibilidad.calendario).toHaveBeenCalledWith(
+      expect.objectContaining({ desde: '2026-11-04', hasta: '2026-11-11' }),
+    );
+  });
+
+  it('un rango entero en el pasado devuelve vacío sin consultar', async () => {
+    const dias = await consultar('2026-10-01', '2026-10-31');
+    expect(dias).toEqual([]);
+    expect(disponibilidad.calendario).not.toHaveBeenCalled();
+  });
+
   it('no recorta un rango que ya cabe dentro del tope', async () => {
     await consultar('2026-11-10', '2026-11-20');
     expect(disponibilidad.calendario).toHaveBeenCalledWith(
