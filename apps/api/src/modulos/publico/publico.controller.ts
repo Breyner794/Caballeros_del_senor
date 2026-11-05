@@ -83,8 +83,8 @@ export class PublicoController {
 
   /**
    * Los POST de gestión llevan además Turnstile: son escrituras sin sesión que
-   * se pueden enumerar. Turnstile va primero para frenar al bot antes de que
-   * cada intento llegue a consultar un token.
+   * se pueden enumerar. El captcha va primero por convención del canal; el
+   * orden no altera lo que se protege.
    */
   @Post('mi-reserva/cancelar')
   @Publico()

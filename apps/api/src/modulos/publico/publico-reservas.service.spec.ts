@@ -18,6 +18,7 @@ import { CODIGOS_ERROR, ESTADOS_QUE_OCUPAN } from '@cds/shared';
 import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
 import { PublicoReservasService } from './publico-reservas.service.js';
 import { PublicoService } from './publico.service.js';
+import { SELECT_BARBERO_PUBLICO, SELECT_SEDE } from './selects-publico.js';
 
 /** El servicio de escritura con el de lecturas real, sobre los mismos dobles. */
 function montarServicio(
@@ -575,8 +576,10 @@ describe('PublicoReservasService: gestión con token', () => {
       const consulta = prisma.reserva.findUnique.mock.calls[0]![0];
       expect(consulta.where).toEqual({ id: ID.reserva });
       // Si faltara una columna que emite el mapeador, saldría `undefined` sin error.
-      expect(consulta.select.sede.select).toMatchObject({ ciudad: true, telefono: true, mapsUrl: true });
-      expect(consulta.select.barbero.select).toMatchObject({ bio: true });
+      // Conjunto entero, no los casos que recordamos hoy: cualquier columna que
+      // emita el mapeador y falte aquí saldría `undefined` sin que nada lo vea.
+      expect(consulta.select.sede.select).toEqual(SELECT_SEDE);
+      expect(consulta.select.barbero.select).toEqual(SELECT_BARBERO_PUBLICO);
     });
 
     it('con la cita a 2 h y límite de cancelación de 4 h, no puede cancelar', async () => {
@@ -662,9 +665,12 @@ describe('PublicoReservasService: gestión con token', () => {
       await expect(servicio.cancelarPropia(resuelta(), datos)).rejects.toBe(fuera);
     });
 
-    it('dos cancelaciones simultáneas con el mismo token: la segunda da ESTADO_RESERVA_INVALIDO', async () => {
-      // El guard resolvió la reserva de las dos peticiones antes de que ninguna
-      // escribiera; el dominio vuelve a leer el estado y la segunda ya la ve cancelada.
+    it('el ESTADO_RESERVA_INVALIDO del dominio pasa tal cual, con su código y su 409', async () => {
+      // Fija que el canal no envuelve ni se traga el error del dominio ni añade un
+      // chequeo de estado propio que cortocircuite la segunda llamada. NO cubre la
+      // carrera real (con el dominio doblado, esto equivale a dos llamadas
+      // seguidas): esa ventana es de `ReservasService.cancelar` y le toca a la
+      // prueba de integración con PostgreSQL.
       reservas.cancelar
         .mockResolvedValueOnce({ id: ID.reserva })
         .mockRejectedValueOnce(
@@ -691,6 +697,10 @@ describe('PublicoReservasService: gestión con token', () => {
   describe('reprogramarPropia', () => {
     const datos = { inicioEn: '2026-11-07T15:00:00.000Z', barberoId: ID.barbero, tokenTurnstile: 't' };
 
+    beforeEach(() => {
+      prisma.usuario.findMany.mockResolvedValue([{ id: ID.barbero }]);
+    });
+
     it('reprograma marcando que viene del cliente, sin actor', async () => {
       await servicio.reprogramarPropia(resuelta(), datos);
       expect(reservas.reprogramar).toHaveBeenCalledWith(
@@ -699,6 +709,28 @@ describe('PublicoReservasService: gestión con token', () => {
         null,
         true,
       );
+    });
+
+    it('rechaza como no encontrado a un barbero que la web no muestra', async () => {
+      // Regla del canal: recepción sí puede mover una cita a un barbero oculto en web.
+      prisma.usuario.findMany.mockResolvedValue([{ id: ID.actor }]);
+      await expect(servicio.reprogramarPropia(resuelta(), datos)).rejects.toMatchObject({
+        codigo: CODIGOS_ERROR.RECURSO_NO_ENCONTRADO,
+      });
+      expect(reservas.reprogramar).not.toHaveBeenCalled();
+    });
+
+    it('comprueba la visibilidad contra la sede de la cita', async () => {
+      prisma.usuario.findMany.mockResolvedValue([{ id: ID.barbero }]);
+      await servicio.reprogramarPropia(resuelta({ sedeId: ID.sede }), datos);
+      expect(JSON.stringify(prisma.usuario.findMany.mock.calls[0]![0])).toContain(ID.sede);
+      expect(reservas.reprogramar).toHaveBeenCalled();
+    });
+
+    it('sin barbero nuevo no consulta la visibilidad', async () => {
+      await servicio.reprogramarPropia(resuelta(), { ...datos, barberoId: undefined });
+      expect(prisma.usuario.findMany).not.toHaveBeenCalled();
+      expect(reservas.reprogramar).toHaveBeenCalled();
     });
 
     it('el cliente no puede mover la cita de sede ni colar otros campos', async () => {

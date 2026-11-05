@@ -236,6 +236,14 @@ export class PublicoReservasService {
     reserva: ReservaResuelta,
     datos: ReprogramarReservaPublicaDto,
   ): Promise<MiReservaPublica & { tokenGestion: string }> {
+    // Regla del canal, no del dominio: recepción sí puede mover una cita a un
+    // barbero oculto en web. Mismo criterio que `verificarVisibleEnWeb` al crear.
+    if (datos.barberoId) {
+      const visibles = await this.lecturas.idsBarberosVisibles(reserva.sedeId);
+      if (!visibles.includes(datos.barberoId)) {
+        throw new ErrorNegocio(CODIGOS_ERROR.RECURSO_NO_ENCONTRADO, 404);
+      }
+    }
     await this.reservas.reprogramar(
       reserva.id,
       { inicioEn: datos.inicioEn, barberoId: datos.barberoId, notificar: true },
