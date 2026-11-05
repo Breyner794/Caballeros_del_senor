@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { CODIGOS_ERROR, ESTADOS_QUE_OCUPAN } from '@cds/shared';
 import type {
   BarberoPublico,
   ConfigPublica,
@@ -11,7 +12,8 @@ import type {
 } from '@cds/shared';
 import { PrismaService } from '../../comun/prisma/prisma.service.js';
 import { ConfiguracionNegocioService } from '../../comun/configuracion/configuracion-negocio.service.js';
-import { hoyLocal } from '../../comun/tiempo/tiempo.js';
+import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
+import { aFechaLocal, hoyLocal, limitesDelRango } from '../../comun/tiempo/tiempo.js';
 import { DisponibilidadService } from '../disponibilidad/disponibilidad.service.js';
 import { aBarberoPublico, aHuecoPublico, aSedePublica, aServicioPublico } from './dto-publico.js';
 
@@ -189,6 +191,90 @@ export class PublicoService {
       soloVisiblesWeb: true,
     });
     return dias.map((dia) => ({ fecha: dia.fecha, hayHueco: dia.huecosLibres > 0 }));
+  }
+
+  // ------------------------------------------------------ Asignación de barbero
+
+  /**
+   * Quién atiende una cita cuando el cliente no eligió barbero. Devuelve su id.
+   *
+   * La decisión se toma aquí, al crear, y no en el navegador: un barbero que
+   * estaba libre cuando se pintó la rejilla puede estar ocupado tres minutos
+   * después. Entre los barberos visibles en la web que tienen el hueco libre
+   * AHORA, gana el menos cargado ese día (minutos de reservas que ocupan silla,
+   * en el día local de la cita). A igualdad de carga, el de `id` menor: es
+   * inmutable, así que editar un perfil no cambia la elección.
+   *
+   * Reduce las colisiones, no las elimina: si dos clientes confirman el mismo
+   * hueco a la vez, la restricción de exclusión de PostgreSQL rechaza a uno.
+   * Cuesta tres consultas por llamada, con independencia de cuántos barberos hay.
+   */
+  async elegirBarbero(datos: {
+    sedeId: string;
+    inicioEn: Date;
+    servicioIds: string[];
+  }): Promise<string> {
+    const { zonaHoraria } = await this.configuracion.obtener();
+    const fecha = aFechaLocal(datos.inicioEn, zonaHoraria);
+    const instante = datos.inicioEn.toISOString();
+
+    // Disponibilidad con las mismas reglas que vio el cliente al elegir la hora.
+    // `delDia` devuelve a todos los barberos de la sede: se filtra por
+    // visibilidad en la web y se hace en paralelo, no uno a uno.
+    const [visibles, dia] = await Promise.all([
+      this.prisma.usuario.findMany({
+        where: {
+          rol: 'BARBERO',
+          activo: true,
+          visibleWeb: true,
+          eliminadoEn: null,
+          OR: [{ sedeId: datos.sedeId }, { sedesPermitidas: { some: { sedeId: datos.sedeId } } }],
+        },
+        select: { id: true },
+      }),
+      this.motorDisponibilidad.delDia({
+        sedeId: datos.sedeId,
+        fecha,
+        servicioIds: datos.servicioIds,
+        aplicarReglasCliente: true,
+      }),
+    ]);
+
+    const idsVisibles = new Set(visibles.map((b: { id: string }) => b.id));
+    const candidatos = dia.barberos
+      .filter(
+        (b) =>
+          idsVisibles.has(b.barberoId) &&
+          b.trabaja &&
+          b.huecos.some((h) => h.inicioEn === instante && h.disponible),
+      )
+      .map((b) => b.barberoId);
+
+    if (!dia.laborable || candidatos.length === 0) {
+      throw new ErrorNegocio(CODIGOS_ERROR.RESERVA_SOLAPADA, 409);
+    }
+    if (candidatos.length === 1) return candidatos[0]!;
+
+    // Carga del día local de cada candidato, en una sola consulta.
+    const { inicio, fin } = limitesDelRango(fecha, fecha, zonaHoraria);
+    const reservas = await this.prisma.reserva.findMany({
+      where: {
+        sedeId: datos.sedeId,
+        barberoId: { in: candidatos },
+        estado: { in: [...ESTADOS_QUE_OCUPAN] },
+        inicioEn: { gte: inicio, lt: fin },
+      },
+      select: { barberoId: true, duracionMinutos: true },
+    });
+
+    const carga = new Map<string, number>(candidatos.map((id) => [id, 0]));
+    for (const r of reservas as { barberoId: string; duracionMinutos: number }[]) {
+      carga.set(r.barberoId, (carga.get(r.barberoId) ?? 0) + r.duracionMinutos);
+    }
+
+    // El desempate por `id` vive aquí, no en el orden en que la base devuelva
+    // las filas: así la elección es la misma con el mismo estado.
+    return [...candidatos].sort((a, b) => carga.get(a)! - carga.get(b)! || (a < b ? -1 : 1))[0]!;
   }
 
   /**

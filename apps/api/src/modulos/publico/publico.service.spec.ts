@@ -5,6 +5,8 @@ import {
   crearPrismaDoble,
 } from '../../../test/soporte/dobles.js';
 import { configuracion } from '../../../test/soporte/datos.js';
+import { CODIGOS_ERROR, ESTADOS_QUE_OCUPAN } from '@cds/shared';
+import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
 import { PublicoService } from './publico.service.js';
 
 const SEDE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -487,5 +489,178 @@ describe('PublicoService.calendario', () => {
     const dias = await consultar('2027-01-10', '2027-01-20');
     expect(dias).toEqual([]);
     expect(disponibilidad.calendario).not.toHaveBeenCalled();
+  });
+});
+
+// ======================== Asignación automática ==============================
+
+describe('PublicoService.elegirBarbero', () => {
+  // 10:00 en Bogotá del 10 de noviembre de 2026.
+  const INICIO = new Date('2026-11-10T15:00:00.000Z');
+  const B1 = '00000000-0000-4000-8000-000000000001';
+  const B2 = '00000000-0000-4000-8000-000000000002';
+  const B3 = '00000000-0000-4000-8000-000000000003';
+
+  let prisma: ReturnType<typeof crearPrismaDoble>;
+  let disponibilidad: ReturnType<typeof crearDisponibilidadDoble>;
+  let servicio: PublicoService;
+
+  /** Un barbero con el hueco de `INICIO` libre u ocupado. */
+  const conHueco = (barberoId: string, disponible = true, trabaja = true) =>
+    agenda(
+      barberoId,
+      [
+        {
+          inicioEn: INICIO.toISOString(),
+          hora: '10:00',
+          disponible,
+          ...(disponible ? {} : { motivo: 'OCUPADO' as const }),
+        },
+      ],
+      trabaja,
+    );
+
+  const pedir = () => servicio.elegirBarbero({ sedeId: SEDE_A, inicioEn: INICIO, servicioIds: [SERVICIO] });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-11-04T15:00:00Z'));
+    prisma = crearPrismaDoble();
+    prisma.usuario.findMany.mockResolvedValue([{ id: B1 }, { id: B2 }, { id: B3 }]);
+    prisma.reserva.findMany.mockResolvedValue([]);
+    disponibilidad = crearDisponibilidadDoble();
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([conHueco(B1), conHueco(B2), conHueco(B3)]),
+    );
+    servicio = new PublicoService(
+      prisma as never,
+      crearConfiguracionDoble(configuracion()) as never,
+      disponibilidad as never,
+    );
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  it('elige al barbero con menos minutos ocupados ese día', async () => {
+    prisma.reserva.findMany.mockResolvedValue([
+      { barberoId: B1, duracionMinutos: 120 },
+      { barberoId: B1, duracionMinutos: 60 },
+      { barberoId: B2, duracionMinutos: 60 },
+      { barberoId: B3, duracionMinutos: 90 },
+    ]);
+    expect(await pedir()).toBe(B2);
+  });
+
+  it('un barbero sin reservas ese día tiene carga cero y gana', async () => {
+    prisma.reserva.findMany.mockResolvedValue([
+      { barberoId: B1, duracionMinutos: 30 },
+      { barberoId: B2, duracionMinutos: 30 },
+    ]);
+    expect(await pedir()).toBe(B3);
+  });
+
+  it('a igualdad de carga elige el de id menor, sin depender del orden de las filas', async () => {
+    prisma.reserva.findMany.mockResolvedValue([
+      { barberoId: B3, duracionMinutos: 60 },
+      { barberoId: B2, duracionMinutos: 60 },
+      { barberoId: B1, duracionMinutos: 60 },
+    ]);
+    const directo = await pedir();
+
+    // Mismo estado, pero la base devuelve todo en el orden contrario.
+    prisma.usuario.findMany.mockResolvedValue([{ id: B3 }, { id: B2 }, { id: B1 }]);
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([conHueco(B3), conHueco(B2), conHueco(B1)]),
+    );
+    prisma.reserva.findMany.mockResolvedValue([
+      { barberoId: B1, duracionMinutos: 60 },
+      { barberoId: B2, duracionMinutos: 60 },
+      { barberoId: B3, duracionMinutos: 60 },
+    ]);
+    const invertido = await pedir();
+
+    expect(directo).toBe(B1);
+    expect(invertido).toBe(B1);
+  });
+
+  it('ignora a los barberos que no tienen ese hueco libre', async () => {
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([conHueco(B1, false), conHueco(B2), conHueco(B3, true, false)]),
+    );
+    prisma.reserva.findMany.mockResolvedValue([{ barberoId: B2, duracionMinutos: 300 }]);
+    expect(await pedir()).toBe(B2);
+  });
+
+  it('ignora a un barbero que no tiene ese instante en su rejilla', async () => {
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([agenda(B1, huecosDe(['09:00'])), conHueco(B2)]),
+    );
+    expect(await pedir()).toBe(B2);
+  });
+
+  it('ignora a los barberos no visibles en la web', async () => {
+    // B1 es el menos cargado y está libre, pero la web no lo muestra.
+    prisma.usuario.findMany.mockResolvedValue([{ id: B2 }, { id: B3 }]);
+    prisma.reserva.findMany.mockResolvedValue([{ barberoId: B2, duracionMinutos: 60 }]);
+    expect(await pedir()).toBe(B3);
+    expect(prisma.usuario.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          rol: 'BARBERO',
+          activo: true,
+          visibleWeb: true,
+          eliminadoEn: null,
+        }),
+      }),
+    );
+  });
+
+  it('mide la carga solo con estados que ocupan y dentro del día local de la cita', async () => {
+    await pedir();
+    const { where } = prisma.reserva.findMany.mock.calls[0]![0];
+    expect(where.estado).toEqual({ in: [...ESTADOS_QUE_OCUPAN] });
+    expect(where.sedeId).toBe(SEDE_A);
+    // Día local 2026-11-10 en Bogotá: de 05:00Z a 05:00Z del día siguiente.
+    expect(where.inicioEn.gte.toISOString()).toBe('2026-11-10T05:00:00.000Z');
+    expect(where.inicioEn.lt.toISOString()).toBe('2026-11-11T05:00:00.000Z');
+  });
+
+  it('pide la disponibilidad del día local con las reglas del cliente y la duración elegida', async () => {
+    await pedir();
+    expect(disponibilidad.delDia).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sedeId: SEDE_A,
+        fecha: '2026-11-10',
+        servicioIds: [SERVICIO],
+        aplicarReglasCliente: true,
+      }),
+    );
+  });
+
+  it('hace un número fijo de consultas, sin bucle por barbero', async () => {
+    await pedir();
+    expect(disponibilidad.delDia).toHaveBeenCalledTimes(1);
+    expect(prisma.usuario.findMany).toHaveBeenCalledTimes(1);
+    expect(prisma.reserva.findMany).toHaveBeenCalledTimes(1);
+  });
+
+  it('lanza RESERVA_SOLAPADA si ninguno está libre', async () => {
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([conHueco(B1, false), conHueco(B2, false)]),
+    );
+    await expect(pedir()).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.RESERVA_SOLAPADA,
+      status: 409,
+    });
+  });
+
+  it('lanza RESERVA_SOLAPADA si los únicos libres no son visibles', async () => {
+    prisma.usuario.findMany.mockResolvedValue([]);
+    await expect(pedir()).rejects.toBeInstanceOf(ErrorNegocio);
+  });
+
+  it('lanza RESERVA_SOLAPADA si el día no es laborable', async () => {
+    disponibilidad.delDia.mockResolvedValue({ ...respuestaDelDia([]), laborable: false });
+    await expect(pedir()).rejects.toMatchObject({ codigo: CODIGOS_ERROR.RESERVA_SOLAPADA });
   });
 });
