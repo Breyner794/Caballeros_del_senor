@@ -52,6 +52,18 @@ const SELECT_BARBERO = {
 } as const;
 
 /**
+ * Quién puede mostrar la web como barbero. Un único criterio para `opciones`,
+ * `disponibilidad` y `elegirBarbero`: si hubiera copias, la que se olvidara
+ * dejaría salir a un barbero que la web no muestra.
+ */
+const BARBERO_VISIBLE_EN_WEB = {
+  rol: 'BARBERO',
+  activo: true,
+  visibleWeb: true,
+  eliminadoEn: null,
+} as const;
+
+/**
  * Fachada del canal público: valida (en el controlador), llama a la
  * persistencia y traduce con los mapeadores. No contiene lógica de negocio.
  */
@@ -79,7 +91,7 @@ export class PublicoService {
         orderBy: [{ orden: 'asc' }, { nombre: 'asc' }],
       }),
       this.prisma.usuario.findMany({
-        where: { rol: 'BARBERO', activo: true, visibleWeb: true, eliminadoEn: null },
+        where: BARBERO_VISIBLE_EN_WEB,
         select: SELECT_BARBERO,
         orderBy: { nombre: 'asc' },
       }),
@@ -130,16 +142,7 @@ export class PublicoService {
     }
 
     const [visibles, dia] = await Promise.all([
-      this.prisma.usuario.findMany({
-        where: {
-          rol: 'BARBERO',
-          activo: true,
-          visibleWeb: true,
-          eliminadoEn: null,
-          OR: [{ sedeId: filtros.sedeId }, { sedesPermitidas: { some: { sedeId: filtros.sedeId } } }],
-        },
-        select: { id: true },
-      }),
+      this.idsBarberosVisibles(filtros.sedeId),
       this.motorDisponibilidad.delDia({
         sedeId: filtros.sedeId,
         barberoId: filtros.barberoId,
@@ -151,7 +154,7 @@ export class PublicoService {
 
     // `delDia` devuelve a todos los barberos de la sede: aquí se descartan los
     // que la web no debe mostrar, antes de que entren en la unión.
-    const idsVisibles = new Set(visibles.map((b: { id: string }) => b.id));
+    const idsVisibles = new Set(visibles);
     // Si el cliente eligió barbero, solo cuenta ese: se comprueba aquí también
     // para no depender de que el motor filtre.
     const barberos = dia.barberos.filter(
@@ -207,6 +210,8 @@ export class PublicoService {
    *
    * Reduce las colisiones, no las elimina: si dos clientes confirman el mismo
    * hueco a la vez, la restricción de exclusión de PostgreSQL rechaza a uno.
+   * No acota la fecha a la ventana de reserva (`maxDiasAnticipacion`): asume
+   * que quien llama ya la validó, como hace `validarHueco` al crear la cita.
    * Cuesta tres consultas por llamada, con independencia de cuántos barberos hay.
    */
   async elegirBarbero(datos: {
@@ -222,16 +227,7 @@ export class PublicoService {
     // `delDia` devuelve a todos los barberos de la sede: se filtra por
     // visibilidad en la web y se hace en paralelo, no uno a uno.
     const [visibles, dia] = await Promise.all([
-      this.prisma.usuario.findMany({
-        where: {
-          rol: 'BARBERO',
-          activo: true,
-          visibleWeb: true,
-          eliminadoEn: null,
-          OR: [{ sedeId: datos.sedeId }, { sedesPermitidas: { some: { sedeId: datos.sedeId } } }],
-        },
-        select: { id: true },
-      }),
+      this.idsBarberosVisibles(datos.sedeId),
       this.motorDisponibilidad.delDia({
         sedeId: datos.sedeId,
         fecha,
@@ -240,7 +236,7 @@ export class PublicoService {
       }),
     ]);
 
-    const idsVisibles = new Set(visibles.map((b: { id: string }) => b.id));
+    const idsVisibles = new Set(visibles);
     const candidatos = dia.barberos
       .filter(
         (b) =>
@@ -255,11 +251,12 @@ export class PublicoService {
     }
     if (candidatos.length === 1) return candidatos[0]!;
 
-    // Carga del día local de cada candidato, en una sola consulta.
+    // Carga del día local de cada candidato (en todas las sedes), en una sola consulta.
     const { inicio, fin } = limitesDelRango(fecha, fecha, zonaHoraria);
     const reservas = await this.prisma.reserva.findMany({
       where: {
-        sedeId: datos.sedeId,
+        // Sin filtrar por sede: los barberos cubren turnos entre sedes y su
+        // tiempo se consume esté donde esté.
         barberoId: { in: candidatos },
         estado: { in: [...ESTADOS_QUE_OCUPAN] },
         inicioEn: { gte: inicio, lt: fin },
@@ -275,6 +272,18 @@ export class PublicoService {
     // El desempate por `id` vive aquí, no en el orden en que la base devuelva
     // las filas: así la elección es la misma con el mismo estado.
     return [...candidatos].sort((a, b) => carga.get(a)! - carga.get(b)! || (a < b ? -1 : 1))[0]!;
+  }
+
+  /** Ids de los barberos que la web muestra en una sede (principal o permitida). */
+  private async idsBarberosVisibles(sedeId: string): Promise<string[]> {
+    const barberos = await this.prisma.usuario.findMany({
+      where: {
+        ...BARBERO_VISIBLE_EN_WEB,
+        OR: [{ sedeId }, { sedesPermitidas: { some: { sedeId } } }],
+      },
+      select: { id: true },
+    });
+    return barberos.map((b: { id: string }) => b.id);
   }
 
   /**

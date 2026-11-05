@@ -619,7 +619,6 @@ describe('PublicoService.elegirBarbero', () => {
     await pedir();
     const { where } = prisma.reserva.findMany.mock.calls[0]![0];
     expect(where.estado).toEqual({ in: [...ESTADOS_QUE_OCUPAN] });
-    expect(where.sedeId).toBe(SEDE_A);
     // Día local 2026-11-10 en Bogotá: de 05:00Z a 05:00Z del día siguiente.
     expect(where.inicioEn.gte.toISOString()).toBe('2026-11-10T05:00:00.000Z');
     expect(where.inicioEn.lt.toISOString()).toBe('2026-11-11T05:00:00.000Z');
@@ -635,6 +634,27 @@ describe('PublicoService.elegirBarbero', () => {
         aplicarReglasCliente: true,
       }),
     );
+  });
+
+  it('cuenta la carga del barbero en todas las sedes, no solo en la de la cita', async () => {
+    // B1 tiene 240 min en otra sede ese día (la consulta no filtra por sede).
+    prisma.reserva.findMany.mockResolvedValue([
+      { barberoId: B1, duracionMinutos: 240 },
+      { barberoId: B2, duracionMinutos: 60 },
+    ]);
+    disponibilidad.delDia.mockResolvedValue(respuestaDelDia([conHueco(B1), conHueco(B2)]));
+    expect(await pedir()).toBe(B2);
+    const { where } = prisma.reserva.findMany.mock.calls[0]![0];
+    expect(where).not.toHaveProperty('sedeId');
+    expect(where.barberoId).toEqual({ in: [B1, B2] });
+  });
+
+  it('con un solo candidato no consulta la carga', async () => {
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([conHueco(B1, false), conHueco(B2), conHueco(B3, false)]),
+    );
+    expect(await pedir()).toBe(B2);
+    expect(prisma.reserva.findMany).not.toHaveBeenCalled();
   });
 
   it('hace un número fijo de consultas, sin bucle por barbero', async () => {
@@ -657,6 +677,10 @@ describe('PublicoService.elegirBarbero', () => {
   it('lanza RESERVA_SOLAPADA si los únicos libres no son visibles', async () => {
     prisma.usuario.findMany.mockResolvedValue([]);
     await expect(pedir()).rejects.toBeInstanceOf(ErrorNegocio);
+    await expect(pedir()).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.RESERVA_SOLAPADA,
+      status: 409,
+    });
   });
 
   it('lanza RESERVA_SOLAPADA si el día no es laborable', async () => {
