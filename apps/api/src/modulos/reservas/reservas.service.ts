@@ -78,7 +78,7 @@ export class ReservasService {
    * la escritura otra persona ocupó el hueco, el `INSERT` falla y el filtro
    * global lo traduce a "ese horario acaba de ocuparse".
    */
-  async crear(datos: CrearReservaDto, actor: UsuarioAutenticado, desdeWeb = false) {
+  async crear(datos: CrearReservaDto, actor: UsuarioAutenticado | null, desdeWeb = false) {
     const zona = await this.configuracion.zonaHoraria();
     const inicioEn = new Date(datos.inicioEn);
 
@@ -113,7 +113,7 @@ export class ReservasService {
         descuento: datos.descuento,
         notaCliente: datos.notaCliente,
         notaInterna: datos.notaInterna,
-        creadoPorId: desdeWeb ? null : actor.id,
+        creadoPorId: desdeWeb ? null : (actor?.id ?? null),
       });
 
       // El premio se aplica al cobrar, no al reservar: hasta que el cliente no
@@ -374,7 +374,12 @@ export class ReservasService {
    * es el caso que pidió el cliente: el barbero se mueve de local y el cliente
    * acepta ir allí, así que la cita se traslada sin cancelarla.
    */
-  async reprogramar(id: string, datos: ReprogramarReservaDto, actor: UsuarioAutenticado, desdeCliente = false) {
+  async reprogramar(
+    id: string,
+    datos: ReprogramarReservaDto,
+    actor: UsuarioAutenticado | null,
+    desdeCliente = false,
+  ) {
     const zona = await this.configuracion.zonaHoraria();
     const config = await this.configuracion.obtener();
     const antes = await this.obtener(id);
@@ -417,7 +422,18 @@ export class ReservasService {
 
     const despues = await this.prisma.reserva.update({
       where: { id },
-      data: { sedeId, barberoId, inicioEn, finEn, finConBufferEn },
+      data: {
+        sedeId,
+        barberoId,
+        inicioEn,
+        finEn,
+        finConBufferEn,
+        // Cuando es el propio cliente quien mueve la cita, el token se rota: el
+        // enlace anterior pudo quedar en un correo o en un historial de
+        // WhatsApp y debe dejar de servir. Si la mueve el panel no se toca: el
+        // cliente no recibiría el enlace nuevo y perdería el acceso a su cita.
+        ...(desdeCliente ? { tokenGestion: tokenGestion() } : {}),
+      },
       include: INCLUDE_RESERVA,
     });
 
@@ -472,6 +488,8 @@ export class ReservasService {
         canceladaEn: new Date(),
         canceladaPor: origen,
         motivoCancelacion: datos.motivo,
+        // Una cita cancelada no se gestiona más: el enlace deja de servir.
+        tokenGestion: null,
       },
       include: INCLUDE_RESERVA,
     });
@@ -734,8 +752,11 @@ export class ReservasService {
    * devuelve `null` y es quien llama el que decide si usa el genérico.
    */
   private async resolverCliente(
-    datos: { clienteId?: string; clienteNuevo?: { nombreCompleto: string; telefono: string; notas?: string } },
-    actor: UsuarioAutenticado,
+    datos: {
+      clienteId?: string;
+      clienteNuevo?: { nombreCompleto: string; telefono: string; email?: string; notas?: string };
+    },
+    actor: UsuarioAutenticado | null,
   ): Promise<string | null> {
     if (datos.clienteId) {
       const existe = await this.prisma.cliente.findFirst({
@@ -761,12 +782,13 @@ export class ReservasService {
         {
           nombreCompleto: datos.clienteNuevo.nombreCompleto,
           telefono: datos.clienteNuevo.telefono,
+          email: datos.clienteNuevo.email,
           notas: datos.clienteNuevo.notas,
           aceptaWhatsapp: true,
-          aceptaEmail: false,
+          // Solo se marca el consentimiento si el cliente dio una dirección.
+          aceptaEmail: Boolean(datos.clienteNuevo.email),
           activo: true,
-          incluye: undefined,
-        } as never,
+        },
         actor,
       );
       return creado.id;
