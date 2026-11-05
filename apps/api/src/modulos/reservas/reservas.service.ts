@@ -787,11 +787,14 @@ export class ReservasService {
           telefono: datos.clienteNuevo.telefono,
           email: datos.clienteNuevo.email,
           notas: datos.clienteNuevo.notas,
-          aceptaWhatsapp: true,
-          // Rellenar el correo en el formulario público es el acto de consentir.
-          // Sin correo el campo se omite en lugar de mandar `false`: al reactivar
-          // una ficha, `ClientesService.crear` copia estos datos tal cual y un
-          // `false` borraría un consentimiento que el cliente dio antes.
+          // Consentimientos: `aceptaWhatsapp` no se manda nunca. En una ficha
+          // nueva rige el `@default(true)` de la columna; al reactivar una
+          // existente, `ClientesService.crear` copia estos datos tal cual y
+          // mandarlo restauraría un consentimiento que el cliente pudo retirar.
+          // `aceptaEmail` sigue la misma regla de no pisar nada: rellenar el
+          // correo en el formulario público es el acto de consentir, así que
+          // solo se manda `true` cuando hay correo; sin correo se omite (un
+          // `false` borraría un consentimiento dado antes).
           ...(datos.clienteNuevo.email ? { aceptaEmail: true } : {}),
           activo: true,
         },

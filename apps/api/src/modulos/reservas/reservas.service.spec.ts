@@ -1936,6 +1936,34 @@ describe('ReservasService: canal público (actor nulo, correo y token de gestió
     expect(data).not.toHaveProperty('aceptaEmail');
   });
 
+  it('no restaura el consentimiento de WhatsApp que el cliente retiró al reactivar su ficha', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+    const clientesReal = new ClientesService(
+      entorno.prisma as never,
+      entorno.auditoria as never,
+      entorno.configuracion as never,
+    );
+    entorno.clientes.crear.mockImplementation((datos: never, actor: never) =>
+      clientesReal.crear(datos, actor),
+    );
+    // La ficha eliminada había pedido no recibir mensajes por WhatsApp.
+    entorno.prisma.cliente.findUnique.mockResolvedValue({
+      id: ID.cliente,
+      nombreCompleto: 'Juan P',
+      eliminadoEn: new Date('2026-01-01T00:00:00Z'),
+      aceptaWhatsapp: false,
+    });
+    entorno.prisma.cliente.update.mockResolvedValue({ id: ID.cliente });
+
+    await entorno.servicio.crear(datosWeb(), null, true);
+
+    const { data } = entorno.prisma.cliente.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).not.toHaveProperty('aceptaWhatsapp');
+  });
+
   it('reutiliza y reactiva la ficha de un teléfono eliminado sin borrarle las notas', async () => {
     const entorno = montar();
     prepararCreacionWeb(entorno);

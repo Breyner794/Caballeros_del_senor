@@ -305,9 +305,10 @@ export class ClientesService {
   }
 
   async crear(
-    // `aceptaEmail` es opcional a propósito: el canal público lo omite cuando el
-    // cliente no da correo, para no pisar un consentimiento anterior al reactivar.
-    datos: Omit<CrearClienteDto, 'aceptaEmail'> & { aceptaEmail?: boolean },
+    // Los consentimientos son opcionales a propósito: el canal público los omite
+    // para no pisar, al reactivar una ficha, lo que el cliente ya había decidido.
+    datos: Omit<CrearClienteDto, 'aceptaEmail' | 'aceptaWhatsapp'> &
+      Partial<Pick<CrearClienteDto, 'aceptaEmail' | 'aceptaWhatsapp'>>,
     actor?: UsuarioAutenticado | null,
   ): Promise<Cliente> {
     const existente = await this.prisma.cliente.findUnique({
