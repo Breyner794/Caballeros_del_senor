@@ -23,9 +23,9 @@ function montar() {
     opciones: vi.fn(),
     disponibilidad: vi.fn(),
     calendario: vi.fn(),
-    crearReserva: vi.fn(async () => ({ codigo: 'CDS-A1B2' })),
   };
-  return { controlador: new PublicoController(servicio as never), servicio };
+  const reservas = { crearReserva: vi.fn(async () => ({ codigo: 'CDS-A1B2' })) };
+  return { controlador: new PublicoController(servicio as never, reservas as never), servicio, reservas };
 }
 
 const validarCon = <E extends ZodTypeAny>(esquema: E, valor: unknown): output<E> =>
@@ -70,12 +70,12 @@ describe('PublicoController.crearReserva', () => {
   const manejador = PublicoController.prototype.crearReserva;
 
   it('delega en el servicio con el cuerpo ya validado', async () => {
-    const { controlador, servicio } = montar();
+    const { controlador, reservas } = montar();
     const datos = validarCon(crearReservaPublicaSchema, cuerpoCrear());
 
     await controlador.crearReserva(datos);
 
-    expect(servicio.crearReserva).toHaveBeenCalledWith(datos);
+    expect(reservas.crearReserva).toHaveBeenCalledWith(datos);
   });
 
   it('declara el límite estricto de peticiones en crear: 5 por hora', () => {

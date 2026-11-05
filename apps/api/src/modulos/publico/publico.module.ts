@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { DisponibilidadModule } from '../disponibilidad/disponibilidad.module.js';
 import { ReservasModule } from '../reservas/reservas.module.js';
 import { PublicoController } from './publico.controller.js';
+import { PublicoReservasService } from './publico-reservas.service.js';
 import { PublicoService } from './publico.service.js';
 
 /**
@@ -11,6 +12,6 @@ import { PublicoService } from './publico.service.js';
 @Module({
   imports: [DisponibilidadModule, ReservasModule],
   controllers: [PublicoController],
-  providers: [PublicoService],
+  providers: [PublicoService, PublicoReservasService],
 })
 export class PublicoModule {}
