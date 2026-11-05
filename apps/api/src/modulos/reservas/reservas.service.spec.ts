@@ -1996,11 +1996,51 @@ describe('ReservasService: canal público (actor nulo, correo y token de gestió
     expect(data['activo']).toBe(true);
     // Prisma ignora `undefined`: la clave puede viajar, pero nunca con un valor
     // ('' o null) que pise las notas que la ficha ya tenía.
-    expect(data['notas']).toBeUndefined();
+    expect(data).not.toHaveProperty('notas');
     const { data: reservaData } = entorno.prisma.reserva.create.mock.calls[0]![0] as {
       data: Record<string, unknown>;
     };
     expect(reservaData['clienteId']).toBe(ID.cliente);
+  });
+
+  it('desde el panel guarda el correo pero no marca aceptaEmail', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+
+    // Tener el dato no es tener permiso para usarlo: lo escribe recepción, no
+    // el cliente, así que nadie ha consentido nada.
+    await entorno.servicio.crear(datosWeb('juan@ejemplo.com'), actorRecepcion());
+
+    const [datos] = entorno.clientes.crear.mock.calls[0]! as [Record<string, unknown>];
+    expect(datos).toMatchObject({ email: 'juan@ejemplo.com' });
+    expect(datos).not.toHaveProperty('aceptaEmail');
+  });
+
+  it('desde el panel no puede crear una cita sin actor', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+
+    await expect(entorno.servicio.crear(datosWeb(), null)).rejects.toThrow();
+
+    // Una cita del panel sin autor sería un agujero de auditoría silencioso.
+    expect(entorno.prisma.reserva.create).not.toHaveBeenCalled();
+    expect(entorno.clientes.crear).not.toHaveBeenCalled();
+    expect(entorno.auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('desde el panel no puede reprogramar sin actor', async () => {
+    const entorno = montar();
+    entorno.prisma.reserva.findUnique.mockResolvedValue(reserva());
+    barberoValido(entorno.prisma);
+
+    await expect(
+      entorno.servicio.reprogramar(
+        ID.reserva,
+        { inicioEn: nuevaHora.toISOString(), notificar: true },
+        null,
+      ),
+    ).rejects.toThrow();
+    expect(entorno.prisma.reserva.update).not.toHaveBeenCalled();
   });
 
   it('invalida el token de gestión al cancelar', async () => {

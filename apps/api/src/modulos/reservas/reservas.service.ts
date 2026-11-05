@@ -79,6 +79,13 @@ export class ReservasService {
    * global lo traduce a "ese horario acaba de ocuparse".
    */
   async crear(datos: CrearReservaDto, actor: UsuarioAutenticado | null, desdeWeb = false) {
+    // Solo el canal público puede no tener actor. Una cita del panel sin autor
+    // sería un agujero de auditoría silencioso: aquí es un error de programación
+    // y debe fallar a gritos, antes de escribir nada.
+    if (!desdeWeb && !actor) {
+      throw new Error('Una reserva creada desde el panel exige un actor autenticado');
+    }
+
     const zona = await this.configuracion.zonaHoraria();
     const inicioEn = new Date(datos.inicioEn);
 
@@ -95,7 +102,7 @@ export class ReservasService {
       aplicarReglasCliente: desdeWeb,
     });
 
-    const clienteId = await this.resolverCliente(datos, actor);
+    const clienteId = await this.resolverCliente(datos, actor, desdeWeb);
     if (clienteId) await this.verificarLimiteReservas(clienteId, desdeWeb);
 
     const config = await this.configuracion.obtener();
@@ -113,7 +120,7 @@ export class ReservasService {
         descuento: datos.descuento,
         notaCliente: datos.notaCliente,
         notaInterna: datos.notaInterna,
-        creadoPorId: desdeWeb ? null : (actor?.id ?? null),
+        creadoPorId: actor && !desdeWeb ? actor.id : null,
       });
 
       // El premio se aplica al cobrar, no al reservar: hasta que el cliente no
@@ -380,6 +387,11 @@ export class ReservasService {
     actor: UsuarioAutenticado | null,
     desdeCliente = false,
   ) {
+    // Mismo criterio que en `crear`: sin actor solo puede mover el propio cliente.
+    if (!desdeCliente && !actor) {
+      throw new Error('Reprogramar desde el panel exige un actor autenticado');
+    }
+
     const zona = await this.configuracion.zonaHoraria();
     const config = await this.configuracion.obtener();
     const antes = await this.obtener(id);
@@ -760,6 +772,7 @@ export class ReservasService {
       clienteNuevo?: { nombreCompleto: string; telefono: string; email?: string; notas?: string };
     },
     actor: UsuarioAutenticado | null,
+    desdeWeb = false,
   ): Promise<string | null> {
     if (datos.clienteId) {
       const existe = await this.prisma.cliente.findFirst({
@@ -786,7 +799,8 @@ export class ReservasService {
           nombreCompleto: datos.clienteNuevo.nombreCompleto,
           telefono: datos.clienteNuevo.telefono,
           email: datos.clienteNuevo.email,
-          notas: datos.clienteNuevo.notas,
+          // Sin notas la clave no existe: al reactivar no puede pisar las que ya había.
+          ...(datos.clienteNuevo.notas !== undefined ? { notas: datos.clienteNuevo.notas } : {}),
           // Consentimientos: `aceptaWhatsapp` no se manda nunca. En una ficha
           // nueva rige el `@default(true)` de la columna; al reactivar una
           // existente, `ClientesService.crear` copia estos datos tal cual y
@@ -794,8 +808,10 @@ export class ReservasService {
           // `aceptaEmail` sigue la misma regla de no pisar nada: rellenar el
           // correo en el formulario público es el acto de consentir, así que
           // solo se manda `true` cuando hay correo; sin correo se omite (un
-          // `false` borraría un consentimiento dado antes).
-          ...(datos.clienteNuevo.email ? { aceptaEmail: true } : {}),
+          // `false` borraría un consentimiento dado antes). Y solo en el canal
+          // público: si el correo lo escribe recepción en el panel se guarda el
+          // dato, pero nadie ha consentido nada.
+          ...(desdeWeb && datos.clienteNuevo.email ? { aceptaEmail: true } : {}),
           activo: true,
         },
         actor,
