@@ -324,24 +324,26 @@ export class PublicoService {
    * `detalle.huecos` los huecos recalculados de ese día para repintar la rejilla.
    */
   async crearReserva(datos: CrearReservaPublicaDto): Promise<ReservaPublica & { tokenGestion: string }> {
-    await this.verificarVisibleEnWeb(datos);
+    // Un servicio repetido no tiene sentido y duplicaría la duración de la cita.
+    const servicioIds = [...new Set(datos.servicioIds)];
+    await this.verificarVisibleEnWeb(datos, servicioIds);
     const inicioEn = new Date(datos.inicioEn);
 
-    let creada: { id: string };
+    let creada: { id: string; codigo: string };
     try {
       const barberoId =
         datos.barberoId ??
         (await this.elegirBarbero({
           sedeId: datos.sedeId,
           inicioEn,
-          servicioIds: datos.servicioIds,
+          servicioIds,
         }));
 
       creada = await this.reservas.crear(
         {
           sedeId: datos.sedeId,
           barberoId,
-          servicioIds: datos.servicioIds,
+          servicioIds,
           inicioEn: datos.inicioEn,
           clienteNuevo: {
             nombreCompleto: datos.cliente.nombreCompleto,
@@ -349,17 +351,20 @@ export class PublicoService {
             email: datos.cliente.email,
           },
           notaCliente: datos.notaCliente,
-          // El canal público no negocia precio ni premios; `confirmar` lo ignora
-          // el dominio cuando viene de la web (decide `requiereConfirmacion`).
+          // El canal público no negocia precio ni premios. `confirmar` lo ignora el
+          // dominio cuando viene de la web (decide `requiereConfirmacion`), pero el
+          // tipo lo exige y el valor ignorado debe ser el inocuo: con `true`, el día
+          // que alguien simplifique esa condición, toda cita web entraría como
+          // CONFIRMADA sin que recepción la apruebe. La web nunca confirma por su cuenta.
           descuento: 0,
           aplicarPremioFidelidad: false,
-          confirmar: true,
+          confirmar: false,
         },
         null,
         true,
       );
     } catch (error) {
-      throw await this.conHuecosSiSeOcupo(error, datos, inicioEn);
+      throw await this.conHuecosSiSeOcupo(error, datos, servicioIds, inicioEn);
     }
 
     const fila = await this.prisma.reserva.findUnique({
@@ -368,7 +373,12 @@ export class PublicoService {
     });
     if (!fila?.tokenGestion) {
       // La cita ya está guardada: que falte su lectura es un fallo del servidor.
-      throw new Error(`La reserva ${creada.id} no se pudo releer tras crearla`);
+      // El token sale una sola vez, así que el cliente se queda sin su llave: el
+      // código en el mensaje (que el filtro global registra) permite a soporte
+      // localizar la cita en lugar de buscarla a ciegas.
+      throw new Error(
+        `La reserva ${creada.codigo} (${creada.id}) se guardó pero no se pudo releer: el cliente no recibió su token de gestión`,
+      );
     }
     return { ...aReservaPublica(fila), tokenGestion: fila.tokenGestion };
   }
@@ -379,15 +389,14 @@ export class PublicoService {
    * Todo lo que falla es «no encontrado»: el cliente no distingue entre un
    * recurso oculto y uno que no existe.
    */
-  private async verificarVisibleEnWeb(datos: CrearReservaPublicaDto): Promise<void> {
-    const idsServicios = [...new Set(datos.servicioIds)];
+  private async verificarVisibleEnWeb(datos: CrearReservaPublicaDto, idsServicios: string[]): Promise<void> {
     const [sede, servicios, barberosVisibles] = await Promise.all([
       this.prisma.sede.findFirst({
         where: { id: datos.sedeId, activa: true, eliminadoEn: null },
         select: { id: true },
       }),
       this.prisma.servicio.findMany({
-        where: { id: { in: datos.servicioIds }, activo: true, visibleWeb: true, eliminadoEn: null },
+        where: { id: { in: idsServicios }, activo: true, visibleWeb: true, eliminadoEn: null },
         select: { id: true },
       }),
       datos.barberoId ? this.idsBarberosVisibles(datos.sedeId) : Promise.resolve(null),
@@ -407,7 +416,12 @@ export class PublicoService {
    * error se devuelve tal cual. Si no se pueden recalcular los huecos, se
    * devuelve el error original: no se tapa un 409 con un 500.
    */
-  private async conHuecosSiSeOcupo(error: unknown, datos: CrearReservaPublicaDto, inicioEn: Date): Promise<unknown> {
+  private async conHuecosSiSeOcupo(
+    error: unknown,
+    datos: CrearReservaPublicaDto,
+    servicioIds: string[],
+    inicioEn: Date,
+  ): Promise<unknown> {
     const esSolape =
       (error instanceof ErrorNegocio && error.codigo === CODIGOS_ERROR.RESERVA_SOLAPADA) ||
       PrismaService.esViolacionDe(error, 'reservas_sin_solape_barbero');
@@ -419,7 +433,7 @@ export class PublicoService {
         sedeId: datos.sedeId,
         barberoId: datos.barberoId,
         fecha: aFechaLocal(inicioEn, zonaHoraria),
-        servicioIds: datos.servicioIds,
+        servicioIds,
       });
       return new ErrorNegocio(CODIGOS_ERROR.RESERVA_SOLAPADA, 409, { huecos });
     } catch {

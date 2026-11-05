@@ -737,7 +737,7 @@ describe('PublicoService.crearReserva', () => {
     prisma.servicio.findMany.mockResolvedValue([{ id: ID.servicioCorte }]);
     prisma.usuario.findMany.mockResolvedValue([{ id: ID.barbero }]);
     prisma.reserva.findUnique.mockResolvedValue(filaPublica());
-    reservas = { crear: vi.fn(async () => ({ id: ID.reserva })) };
+    reservas = { crear: vi.fn(async () => ({ id: ID.reserva, codigo: 'CDS-A1B2' })) };
     disponibilidad = crearDisponibilidadDoble();
     servicio = new PublicoService(
       prisma as never,
@@ -783,8 +783,23 @@ describe('PublicoService.crearReserva', () => {
       notaCliente: 'Sin prisa',
       descuento: 0,
       aplicarPremioFidelidad: false,
-      confirmar: true,
+      confirmar: false,
     });
+  });
+
+  it('no manda dos veces el mismo servicio al dominio ni a la elección de barbero', async () => {
+    const elegir = vi.spyOn(servicio, 'elegirBarbero').mockResolvedValue(ID.barbero);
+    await servicio.crearReserva(
+      datosWeb({ barberoId: undefined, servicioIds: [ID.servicioCorte, ID.servicioCorte] }),
+    );
+    expect(reservas.crear.mock.calls[0]![0]).toMatchObject({ servicioIds: [ID.servicioCorte] });
+    expect(elegir).toHaveBeenCalledWith(expect.objectContaining({ servicioIds: [ID.servicioCorte] }));
+  });
+
+  it('si la relectura falla, el error lleva el código de la cita para que soporte la localice', async () => {
+    reservas.crear.mockResolvedValue({ id: ID.reserva, codigo: 'CDS-A1B2' });
+    prisma.reserva.findUnique.mockResolvedValue(null);
+    await expect(servicio.crearReserva(datosWeb())).rejects.toThrow(/CDS-A1B2/);
   });
 
   it('rechaza un servicio que no es visible en web', async () => {

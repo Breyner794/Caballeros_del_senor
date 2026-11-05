@@ -79,6 +79,11 @@ describe('PublicoController.crearReserva', () => {
   });
 
   it('declara el límite estricto de peticiones en crear: 5 por hora', () => {
+    // Las claves `THROTTLER:LIMITdefault` y `THROTTLER:TTLdefault` son un detalle
+    // interno de `@nestjs/throttler`: un salto de versión mayor puede renombrarlas
+    // y entonces esta prueba fallaría sin que el límite haya cambiado. Es el precio
+    // de comprobar lo que el framework lee de verdad; si falla tras actualizar,
+    // revisa primero esos nombres.
     expect(Reflect.getMetadata('THROTTLER:LIMITdefault', manejador)).toBe(5);
     expect(Reflect.getMetadata('THROTTLER:TTLdefault', manejador)).toBe(60 * 60 * 1000);
   });
