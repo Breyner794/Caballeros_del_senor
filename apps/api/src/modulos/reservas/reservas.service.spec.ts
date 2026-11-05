@@ -1898,16 +1898,42 @@ describe('ReservasService: canal público (actor nulo, correo y token de gestió
     );
   });
 
-  it('sin correo no marca aceptaEmail', async () => {
+  it('sin correo no manda aceptaEmail: lo omite, no lo pone a false', async () => {
     const entorno = montar();
     prepararCreacionWeb(entorno);
 
     await entorno.servicio.crear(datosWeb(), null, true);
 
-    expect(entorno.clientes.crear).toHaveBeenCalledWith(
-      expect.objectContaining({ aceptaEmail: false }),
-      null,
+    const [datos] = entorno.clientes.crear.mock.calls[0]! as [Record<string, unknown>];
+    expect(datos).not.toHaveProperty('aceptaEmail');
+  });
+
+  it('no degrada el consentimiento previo al reactivar una ficha cuando no hay correo', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+    const clientesReal = new ClientesService(
+      entorno.prisma as never,
+      entorno.auditoria as never,
+      entorno.configuracion as never,
     );
+    entorno.clientes.crear.mockImplementation((datos: never, actor: never) =>
+      clientesReal.crear(datos, actor),
+    );
+    // La ficha eliminada había consentido recibir correo.
+    entorno.prisma.cliente.findUnique.mockResolvedValue({
+      id: ID.cliente,
+      nombreCompleto: 'Juan P',
+      eliminadoEn: new Date('2026-01-01T00:00:00Z'),
+      aceptaEmail: true,
+    });
+    entorno.prisma.cliente.update.mockResolvedValue({ id: ID.cliente });
+
+    await entorno.servicio.crear(datosWeb(), null, true);
+
+    const { data } = entorno.prisma.cliente.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).not.toHaveProperty('aceptaEmail');
   });
 
   it('reutiliza y reactiva la ficha de un teléfono eliminado sin borrarle las notas', async () => {

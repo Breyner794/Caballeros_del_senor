@@ -428,10 +428,13 @@ export class ReservasService {
         inicioEn,
         finEn,
         finConBufferEn,
-        // Cuando es el propio cliente quien mueve la cita, el token se rota: el
-        // enlace anterior pudo quedar en un correo o en un historial de
-        // WhatsApp y debe dejar de servir. Si la mueve el panel no se toca: el
-        // cliente no recibiría el enlace nuevo y perdería el acceso a su cita.
+        // Asimetría deliberada, no la «arregles». Si mueve la cita el propio
+        // cliente, el token se rota: la respuesta le devuelve el nuevo y el
+        // enlace viejo (que pudo quedar en un correo o en WhatsApp) deja de
+        // servir. Si la mueve recepción NO se rota: nadie le enviaría el
+        // enlace nuevo al cliente, que perdería el acceso a su propia cita, y
+        // como el token identifica la cita (no una sesión) rotarlo aquí no
+        // protege de nada.
         ...(desdeCliente ? { tokenGestion: tokenGestion() } : {}),
       },
       include: INCLUDE_RESERVA,
@@ -785,8 +788,11 @@ export class ReservasService {
           email: datos.clienteNuevo.email,
           notas: datos.clienteNuevo.notas,
           aceptaWhatsapp: true,
-          // Solo se marca el consentimiento si el cliente dio una dirección.
-          aceptaEmail: Boolean(datos.clienteNuevo.email),
+          // Rellenar el correo en el formulario público es el acto de consentir.
+          // Sin correo el campo se omite en lugar de mandar `false`: al reactivar
+          // una ficha, `ClientesService.crear` copia estos datos tal cual y un
+          // `false` borraría un consentimiento que el cliente dio antes.
+          ...(datos.clienteNuevo.email ? { aceptaEmail: true } : {}),
           activo: true,
         },
         actor,
