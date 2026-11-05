@@ -3,19 +3,28 @@ import { CODIGOS_ERROR, ESTADOS_QUE_OCUPAN } from '@cds/shared';
 import type {
   BarberoPublico,
   ConfigPublica,
+  CrearReservaPublicaDto,
   ConsultarCalendarioPublicoDto,
   ConsultarDisponibilidadPublicaDto,
   DiaCalendarioPublico,
   HuecoDisponible,
   HuecoPublico,
   OpcionesPublicas,
+  ReservaPublica,
 } from '@cds/shared';
 import { PrismaService } from '../../comun/prisma/prisma.service.js';
 import { ConfiguracionNegocioService } from '../../comun/configuracion/configuracion-negocio.service.js';
 import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
 import { aFechaLocal, hoyLocal, limitesDelRango } from '../../comun/tiempo/tiempo.js';
 import { DisponibilidadService } from '../disponibilidad/disponibilidad.service.js';
-import { aBarberoPublico, aHuecoPublico, aSedePublica, aServicioPublico } from './dto-publico.js';
+import { ReservasService } from '../reservas/reservas.service.js';
+import {
+  aBarberoPublico,
+  aHuecoPublico,
+  aReservaPublica,
+  aSedePublica,
+  aServicioPublico,
+} from './dto-publico.js';
 
 /**
  * Los `select` piden solo las columnas que emite el mapeador correspondiente:
@@ -52,6 +61,27 @@ const SELECT_BARBERO = {
 } as const;
 
 /**
+ * Lo que la respuesta de crear necesita, y nada más. El `include` de
+ * `ReservasService.crear` es el del panel: trae la sede sin `ciudad`,
+ * `telefono` ni `mapsUrl` y el barbero sin `bio`, así que se relee con el
+ * `select` público. `tokenGestion` sale una sola vez, en esta respuesta.
+ */
+const SELECT_RESERVA_PUBLICA = {
+  codigo: true,
+  estado: true,
+  inicioEn: true,
+  finEn: true,
+  total: true,
+  tokenGestion: true,
+  sede: { select: SELECT_SEDE },
+  barbero: { select: { id: true, nombre: true, alias: true, bio: true, fotoUrl: true } },
+  servicios: {
+    select: { nombreSnapshot: true, precioSnapshot: true, duracionSnapshot: true },
+    orderBy: { orden: 'asc' },
+  },
+} as const;
+
+/**
  * Quién puede mostrar la web como barbero. Un único criterio para `opciones`,
  * `disponibilidad` y `elegirBarbero`: si hubiera copias, la que se olvidara
  * dejaría salir a un barbero que la web no muestra.
@@ -73,6 +103,7 @@ export class PublicoService {
     private readonly prisma: PrismaService,
     private readonly configuracion: ConfiguracionNegocioService,
     private readonly motorDisponibilidad: DisponibilidadService,
+    private readonly reservas: ReservasService,
   ) {}
 
   // ---------------------------------------------------------------- Opciones
@@ -272,6 +303,128 @@ export class PublicoService {
     // El desempate por `id` vive aquí, no en el orden en que la base devuelva
     // las filas: así la elección es la misma con el mismo estado.
     return [...candidatos].sort((a, b) => carga.get(a)! - carga.get(b)! || (a < b ? -1 : 1))[0]!;
+  }
+
+  // -------------------------------------------------------------- Crear reserva
+
+  /**
+   * Crea una reserva desde la web y devuelve su vista pública con el token de
+   * gestión, que sale aquí y en ningún otro sitio.
+   *
+   * Las reglas de la cita (antelación, tope de citas activas, estado inicial,
+   * canal) son del dominio: aquí solo se aplica lo que es del canal, que la web
+   * solo reserva lo que muestra (sede activa, servicios y barbero visibles), y
+   * se traduce el cuerpo. El DTO del dominio se construye campo a campo: lo que
+   * no se nombra aquí no llega a la base de datos, por mucho que el cuerpo lo
+   * traiga. El esquema público llama `cliente` a lo que el dominio llama
+   * `clienteNuevo`; con la clave equivocada no habría error, pero la cita
+   * quedaría sin ficha, sin teléfono y sin sellos de fidelidad.
+   *
+   * Si el horario se ocupa mientras el cliente confirmaba, el error lleva en
+   * `detalle.huecos` los huecos recalculados de ese día para repintar la rejilla.
+   */
+  async crearReserva(datos: CrearReservaPublicaDto): Promise<ReservaPublica & { tokenGestion: string }> {
+    await this.verificarVisibleEnWeb(datos);
+    const inicioEn = new Date(datos.inicioEn);
+
+    let creada: { id: string };
+    try {
+      const barberoId =
+        datos.barberoId ??
+        (await this.elegirBarbero({
+          sedeId: datos.sedeId,
+          inicioEn,
+          servicioIds: datos.servicioIds,
+        }));
+
+      creada = await this.reservas.crear(
+        {
+          sedeId: datos.sedeId,
+          barberoId,
+          servicioIds: datos.servicioIds,
+          inicioEn: datos.inicioEn,
+          clienteNuevo: {
+            nombreCompleto: datos.cliente.nombreCompleto,
+            telefono: datos.cliente.telefono,
+            email: datos.cliente.email,
+          },
+          notaCliente: datos.notaCliente,
+          // El canal público no negocia precio ni premios; `confirmar` lo ignora
+          // el dominio cuando viene de la web (decide `requiereConfirmacion`).
+          descuento: 0,
+          aplicarPremioFidelidad: false,
+          confirmar: true,
+        },
+        null,
+        true,
+      );
+    } catch (error) {
+      throw await this.conHuecosSiSeOcupo(error, datos, inicioEn);
+    }
+
+    const fila = await this.prisma.reserva.findUnique({
+      where: { id: creada.id },
+      select: SELECT_RESERVA_PUBLICA,
+    });
+    if (!fila?.tokenGestion) {
+      // La cita ya está guardada: que falte su lectura es un fallo del servidor.
+      throw new Error(`La reserva ${creada.id} no se pudo releer tras crearla`);
+    }
+    return { ...aReservaPublica(fila), tokenGestion: fila.tokenGestion };
+  }
+
+  /**
+   * Regla del canal, no del dominio: recepción sí puede reservar desde el panel
+   * un servicio oculto en web, y `resolverServicios` solo filtra por `activo`.
+   * Todo lo que falla es «no encontrado»: el cliente no distingue entre un
+   * recurso oculto y uno que no existe.
+   */
+  private async verificarVisibleEnWeb(datos: CrearReservaPublicaDto): Promise<void> {
+    const idsServicios = [...new Set(datos.servicioIds)];
+    const [sede, servicios, barberosVisibles] = await Promise.all([
+      this.prisma.sede.findFirst({
+        where: { id: datos.sedeId, activa: true, eliminadoEn: null },
+        select: { id: true },
+      }),
+      this.prisma.servicio.findMany({
+        where: { id: { in: datos.servicioIds }, activo: true, visibleWeb: true, eliminadoEn: null },
+        select: { id: true },
+      }),
+      datos.barberoId ? this.idsBarberosVisibles(datos.sedeId) : Promise.resolve(null),
+    ]);
+
+    const barberoOculto = barberosVisibles !== null && !barberosVisibles.includes(datos.barberoId!);
+    if (!sede || servicios.length !== idsServicios.length || barberoOculto) {
+      throw new ErrorNegocio(CODIGOS_ERROR.RECURSO_NO_ENCONTRADO, 404);
+    }
+  }
+
+  /**
+   * Dos clientes pueden pulsar el mismo hueco a la vez: el segundo recibe el
+   * error con los huecos recalculados de ese día, no un formulario vacío. El
+   * solape llega por tres caminos (validación del dominio, `elegirBarbero` sin
+   * candidatos y la restricción de exclusión de PostgreSQL); cualquier otro
+   * error se devuelve tal cual. Si no se pueden recalcular los huecos, se
+   * devuelve el error original: no se tapa un 409 con un 500.
+   */
+  private async conHuecosSiSeOcupo(error: unknown, datos: CrearReservaPublicaDto, inicioEn: Date): Promise<unknown> {
+    const esSolape =
+      (error instanceof ErrorNegocio && error.codigo === CODIGOS_ERROR.RESERVA_SOLAPADA) ||
+      PrismaService.esViolacionDe(error, 'reservas_sin_solape_barbero');
+    if (!esSolape) return error;
+
+    try {
+      const { zonaHoraria } = await this.configuracion.obtener();
+      const { huecos } = await this.disponibilidad({
+        sedeId: datos.sedeId,
+        barberoId: datos.barberoId,
+        fecha: aFechaLocal(inicioEn, zonaHoraria),
+        servicioIds: datos.servicioIds,
+      });
+      return new ErrorNegocio(CODIGOS_ERROR.RESERVA_SOLAPADA, 409, { huecos });
+    } catch {
+      return error;
+    }
   }
 
   /** Ids de los barberos que la web muestra en una sede (principal o permitida). */

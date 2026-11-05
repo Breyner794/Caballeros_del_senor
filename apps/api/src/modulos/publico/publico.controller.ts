@@ -1,12 +1,16 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
+import { Throttle } from '@nestjs/throttler';
 import {
   consultarCalendarioPublicoSchema,
   consultarDisponibilidadPublicaSchema,
+  crearReservaPublicaSchema,
   type ConsultarCalendarioPublicoDto,
   type ConsultarDisponibilidadPublicaDto,
+  type CrearReservaPublicaDto,
 } from '@cds/shared';
 import { Publico } from '../../comun/autenticacion/decoradores.js';
 import { validar } from '../../comun/validacion/zod.pipe.js';
+import { GuardTurnstile } from './guard-turnstile.js';
 import { PublicoService } from './publico.service.js';
 
 /**
@@ -39,5 +43,19 @@ export class PublicoController {
   @Publico()
   calendario(@Query(validar(consultarCalendarioPublicoSchema)) filtros: ConsultarCalendarioPublicoDto) {
     return this.servicio.calendario(filtros);
+  }
+
+  /**
+   * Crea una reserva desde la web. Es la primera ruta pública que escribe, y se
+   * defiende en dos capas: Turnstile frena a los bots y el límite de 5 por hora
+   * y por IP al humano insistente. Devuelve el `tokenGestion` una sola vez: es
+   * la única llave de la cita.
+   */
+  @Post('reservas')
+  @Publico()
+  @Throttle({ default: { limit: 5, ttl: 60 * 60 * 1000 } })
+  @UseGuards(GuardTurnstile)
+  crearReserva(@Body(validar(crearReservaPublicaSchema)) datos: CrearReservaPublicaDto) {
+    return this.servicio.crearReserva(datos);
   }
 }

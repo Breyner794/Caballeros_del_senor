@@ -1,11 +1,15 @@
 import { Module } from '@nestjs/common';
 import { DisponibilidadModule } from '../disponibilidad/disponibilidad.module.js';
+import { ReservasModule } from '../reservas/reservas.module.js';
 import { PublicoController } from './publico.controller.js';
 import { PublicoService } from './publico.service.js';
 
-/** Canal público: Prisma y la configuración vienen del `ComunModule` global. */
+/**
+ * Canal público: Prisma y la configuración vienen del `ComunModule` global.
+ * `ReservasModule` aporta el dominio de la cita: la web no reimplementa sus reglas.
+ */
 @Module({
-  imports: [DisponibilidadModule],
+  imports: [DisponibilidadModule, ReservasModule],
   controllers: [PublicoController],
   providers: [PublicoService],
 })
