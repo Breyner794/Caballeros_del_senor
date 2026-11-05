@@ -1,11 +1,16 @@
 import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
-import { crearReservaPublicaSchema } from '@cds/shared';
+import {
+  cancelarReservaPublicaSchema,
+  crearReservaPublicaSchema,
+  reprogramarReservaPublicaSchema,
+} from '@cds/shared';
 import type { ZodSchema, ZodTypeAny, output } from 'zod';
 import { CLAVE_PUBLICO } from '../../comun/autenticacion/decoradores.js';
 import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
 import { validar } from '../../comun/validacion/zod.pipe.js';
 import { ID } from '../../../test/soporte/datos.js';
+import { GuardTokenGestion } from './guard-token-gestion.js';
 import { GuardTurnstile } from './guard-turnstile.js';
 import { PublicoController } from './publico.controller.js';
 
@@ -24,7 +29,12 @@ function montar() {
     disponibilidad: vi.fn(),
     calendario: vi.fn(),
   };
-  const reservas = { crearReserva: vi.fn(async () => ({ codigo: 'CDS-A1B2' })) };
+  const reservas = {
+    crearReserva: vi.fn(async () => ({ codigo: 'CDS-A1B2' })),
+    miReserva: vi.fn(async () => ({ codigo: 'CDS-A1B2' })),
+    cancelarPropia: vi.fn(async () => ({ codigo: 'CDS-A1B2' })),
+    reprogramarPropia: vi.fn(async () => ({ codigo: 'CDS-A1B2' })),
+  };
   return { controlador: new PublicoController(servicio as never, reservas as never), servicio, reservas };
 }
 
@@ -126,5 +136,57 @@ describe('PublicoController.crearReserva', () => {
     ]) {
       expect(() => validarCon(crearReservaPublicaSchema, cuerpo)).toThrow(ErrorNegocio);
     }
+  });
+});
+
+describe('PublicoController: mi-reserva', () => {
+  const proto = PublicoController.prototype;
+  const GET = 0;
+  const POST = 1;
+  const reservaDelGuard = { id: ID.reserva } as never;
+
+  it('las tres rutas cuelgan de mi-reserva con el verbo correcto', () => {
+    expect(Reflect.getMetadata('method', proto.miReserva)).toBe(GET);
+    expect(Reflect.getMetadata('path', proto.miReserva)).toBe('mi-reserva');
+    expect(Reflect.getMetadata('method', proto.cancelarMiReserva)).toBe(POST);
+    expect(Reflect.getMetadata('path', proto.cancelarMiReserva)).toBe('mi-reserva/cancelar');
+    expect(Reflect.getMetadata('method', proto.reprogramarMiReserva)).toBe(POST);
+    expect(Reflect.getMetadata('path', proto.reprogramarMiReserva)).toBe('mi-reserva/reprogramar');
+  });
+
+  it('las tres autentican con el token de gestión', () => {
+    for (const ruta of [proto.miReserva, proto.cancelarMiReserva, proto.reprogramarMiReserva]) {
+      expect(Reflect.getMetadata('__guards__', ruta)).toContain(GuardTokenGestion);
+    }
+  });
+
+  it('Turnstile solo en los POST', () => {
+    expect(Reflect.getMetadata('__guards__', proto.miReserva)).not.toContain(GuardTurnstile);
+    expect(Reflect.getMetadata('__guards__', proto.cancelarMiReserva)).toContain(GuardTurnstile);
+    expect(Reflect.getMetadata('__guards__', proto.reprogramarMiReserva)).toContain(GuardTurnstile);
+  });
+
+  it('delegan en el servicio con la reserva del guard y el cuerpo validado', async () => {
+    const { controlador, reservas } = montar();
+    const cancelar = validarCon(cancelarReservaPublicaSchema, { tokenTurnstile: 't' });
+    const mover = validarCon(reprogramarReservaPublicaSchema, {
+      inicioEn: '2026-11-07T15:00:00.000Z',
+      tokenTurnstile: 't',
+    });
+
+    await controlador.miReserva(reservaDelGuard);
+    await controlador.cancelarMiReserva(reservaDelGuard, cancelar);
+    await controlador.reprogramarMiReserva(reservaDelGuard, mover);
+
+    expect(reservas.miReserva).toHaveBeenCalledWith(reservaDelGuard);
+    expect(reservas.cancelarPropia).toHaveBeenCalledWith(reservaDelGuard, cancelar);
+    expect(reservas.reprogramarPropia).toHaveBeenCalledWith(reservaDelGuard, mover);
+  });
+
+  it('los esquemas exigen el token de Turnstile', () => {
+    expect(() => validarCon(cancelarReservaPublicaSchema, {})).toThrow(ErrorNegocio);
+    expect(() =>
+      validarCon(reprogramarReservaPublicaSchema, { inicioEn: '2026-11-07T15:00:00.000Z' }),
+    ).toThrow(ErrorNegocio);
   });
 });

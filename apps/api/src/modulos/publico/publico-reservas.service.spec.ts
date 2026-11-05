@@ -480,3 +480,249 @@ describe('PublicoReservasService.crearReserva', () => {
     });
   });
 });
+
+// ================= Gestión de la cita con el token ===========================
+
+describe('PublicoReservasService: gestión con token', () => {
+  // Ahora: 2026-11-04 15:00Z. Límites por defecto de la configuración: 4 h y 4 h.
+  const AHORA = new Date('2026-11-04T15:00:00Z');
+  const enHoras = (h: number) => new Date(AHORA.getTime() + h * 3_600_000);
+
+  /** Fila interna que entrega el guard: lleva token, nota interna y ficha del cliente. */
+  const resuelta = (cambios: Record<string, unknown> = {}) =>
+    ({
+      id: ID.reserva,
+      codigo: 'CDS-A1B2',
+      estado: 'CONFIRMADA',
+      inicioEn: enHoras(48),
+      tokenGestion: 'tok_guard',
+      notaInterna: 'NOTA INTERNA',
+      clienteId: ID.cliente,
+      ...cambios,
+    }) as never;
+
+  /** Lo que devuelve la relectura con el `select` público. */
+  const filaPublica = (cambios: Record<string, unknown> = {}) => ({
+    codigo: 'CDS-A1B2',
+    estado: 'CONFIRMADA',
+    inicioEn: enHoras(48),
+    finEn: enHoras(48.5),
+    total: new Prisma.Decimal(30000),
+    tokenGestion: 'tok_relectura',
+    sede: sede(ID.sede, 'Centro'),
+    barbero: { id: ID.barbero, nombre: 'Andrés', alias: 'Andy', bio: 'Clásicos', fotoUrl: null },
+    servicios: [
+      { nombreSnapshot: 'Corte', precioSnapshot: new Prisma.Decimal(30000), duracionSnapshot: 30 },
+    ],
+    ...cambios,
+  });
+
+  let prisma: ReturnType<typeof crearPrismaDoble>;
+  let reservas: { cancelar: ReturnType<typeof vi.fn>; reprogramar: ReturnType<typeof vi.fn> };
+  let servicio: PublicoReservasService;
+
+  const montarConLimites = (cambios: Record<string, unknown> = {}) => {
+    const config = crearConfiguracionDoble(configuracion(cambios)) as never;
+    const disponibilidad = crearDisponibilidadDoble();
+    const lecturas = new PublicoService(prisma as never, config, disponibilidad as never);
+    servicio = new PublicoReservasService(
+      prisma as never,
+      config,
+      disponibilidad as never,
+      reservas as never,
+      lecturas,
+    );
+  };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(AHORA);
+    prisma = crearPrismaDoble();
+    prisma.reserva.findUnique.mockResolvedValue(filaPublica());
+    reservas = {
+      cancelar: vi.fn(async () => ({ id: ID.reserva })),
+      reprogramar: vi.fn(async () => ({ id: ID.reserva })),
+    };
+    montarConLimites();
+  });
+
+  afterEach(() => vi.useRealTimers());
+
+  describe('miReserva', () => {
+    it('devuelve la vista pública con las dos banderas, sin token ni datos internos', async () => {
+      const respuesta = await servicio.miReserva(resuelta());
+
+      expect(Object.keys(respuesta).sort()).toEqual(
+        [
+          'barbero',
+          'codigo',
+          'estado',
+          'finEn',
+          'inicioEn',
+          'puedeCancelar',
+          'puedeReprogramar',
+          'sede',
+          'servicios',
+          'total',
+        ].sort(),
+      );
+      expect(respuesta).toMatchObject({ puedeCancelar: true, puedeReprogramar: true });
+      expect(JSON.stringify(respuesta)).not.toMatch(/tok_guard|tok_relectura|NOTA INTERNA/);
+    });
+
+    it('relee por id con el select público completo', async () => {
+      await servicio.miReserva(resuelta());
+      const consulta = prisma.reserva.findUnique.mock.calls[0]![0];
+      expect(consulta.where).toEqual({ id: ID.reserva });
+      // Si faltara una columna que emite el mapeador, saldría `undefined` sin error.
+      expect(consulta.select.sede.select).toMatchObject({ ciudad: true, telefono: true, mapsUrl: true });
+      expect(consulta.select.barbero.select).toMatchObject({ bio: true });
+    });
+
+    it('con la cita a 2 h y límite de cancelación de 4 h, no puede cancelar', async () => {
+      prisma.reserva.findUnique.mockResolvedValue(filaPublica({ inicioEn: enHoras(2) }));
+      expect(await servicio.miReserva(resuelta())).toMatchObject({
+        puedeCancelar: false,
+        puedeReprogramar: false,
+      });
+    });
+
+    it('los dos límites son independientes', async () => {
+      // A 3 h: cancelar exige 2 h (puede), reprogramar exige 6 h (no puede).
+      montarConLimites({ horasLimiteCancelacion: 2, horasLimiteReprogramacion: 6 });
+      prisma.reserva.findUnique.mockResolvedValue(filaPublica({ inicioEn: enHoras(3) }));
+      expect(await servicio.miReserva(resuelta())).toMatchObject({
+        puedeCancelar: true,
+        puedeReprogramar: false,
+      });
+
+      montarConLimites({ horasLimiteCancelacion: 6, horasLimiteReprogramacion: 2 });
+      expect(await servicio.miReserva(resuelta())).toMatchObject({
+        puedeCancelar: false,
+        puedeReprogramar: true,
+      });
+    });
+
+    it('justo en el límite todavía puede (el dominio rechaza solo por debajo)', async () => {
+      prisma.reserva.findUnique.mockResolvedValue(filaPublica({ inicioEn: enHoras(4) }));
+      expect(await servicio.miReserva(resuelta())).toMatchObject({
+        puedeCancelar: true,
+        puedeReprogramar: true,
+      });
+    });
+
+    it('una cita que no está viva no se puede cancelar ni reprogramar, aunque sobre tiempo', async () => {
+      // EN_CURSO queda fuera: el dominio sí permite EN_CURSO -> CANCELADA (y el plazo lo cubre en la práctica).
+      for (const estado of ['COMPLETADA', 'CANCELADA', 'NO_ASISTIO']) {
+        prisma.reserva.findUnique.mockResolvedValue(filaPublica({ estado }));
+        expect(await servicio.miReserva(resuelta()), estado).toMatchObject({
+          puedeCancelar: false,
+          puedeReprogramar: false,
+        });
+      }
+    });
+
+    it('si la relectura no encuentra la cita, responde no encontrado', async () => {
+      prisma.reserva.findUnique.mockResolvedValue(null);
+      await expect(servicio.miReserva(resuelta())).rejects.toMatchObject({
+        codigo: CODIGOS_ERROR.RECURSO_NO_ENCONTRADO,
+      });
+    });
+  });
+
+  describe('cancelarPropia', () => {
+    const datos = { motivo: 'Me surgió un viaje', tokenTurnstile: 't' };
+
+    it('cancela declarando el origen CLIENTE y sin actor', async () => {
+      await servicio.cancelarPropia(resuelta(), datos);
+      // Un origen equivocado no da error: solo se salta el plazo del cliente.
+      expect(reservas.cancelar).toHaveBeenCalledWith(
+        ID.reserva,
+        { motivo: 'Me surgió un viaje', notificar: true },
+        null,
+        'CLIENTE',
+      );
+    });
+
+    it('no pasa al dominio el token de Turnstile', async () => {
+      await servicio.cancelarPropia(resuelta(), datos);
+      expect(JSON.stringify(reservas.cancelar.mock.calls[0]![1])).not.toContain('tokenTurnstile');
+    });
+
+    it('responde con la cita cancelada, sin token y sin poder gestionarla', async () => {
+      prisma.reserva.findUnique.mockResolvedValue(filaPublica({ estado: 'CANCELADA', tokenGestion: null }));
+      const respuesta = await servicio.cancelarPropia(resuelta(), datos);
+      expect(respuesta).toMatchObject({ estado: 'CANCELADA', puedeCancelar: false, puedeReprogramar: false });
+      expect(respuesta).not.toHaveProperty('tokenGestion');
+    });
+
+    it('si el dominio rechaza por plazo, el error llega tal cual', async () => {
+      const fuera = new ErrorNegocio(CODIGOS_ERROR.FUERA_DE_PLAZO_CANCELACION, 409);
+      reservas.cancelar.mockRejectedValue(fuera);
+      await expect(servicio.cancelarPropia(resuelta(), datos)).rejects.toBe(fuera);
+    });
+
+    it('dos cancelaciones simultáneas con el mismo token: la segunda da ESTADO_RESERVA_INVALIDO', async () => {
+      // El guard resolvió la reserva de las dos peticiones antes de que ninguna
+      // escribiera; el dominio vuelve a leer el estado y la segunda ya la ve cancelada.
+      reservas.cancelar
+        .mockResolvedValueOnce({ id: ID.reserva })
+        .mockRejectedValueOnce(
+          new ErrorNegocio(CODIGOS_ERROR.ESTADO_RESERVA_INVALIDO, 409, { estadoActual: 'CANCELADA' }),
+        );
+      prisma.reserva.findUnique.mockResolvedValue(filaPublica({ estado: 'CANCELADA', tokenGestion: null }));
+      const delGuard = resuelta();
+
+      const [primera, segunda] = await Promise.allSettled([
+        servicio.cancelarPropia(delGuard, datos),
+        servicio.cancelarPropia(delGuard, datos),
+      ]);
+
+      expect(primera.status).toBe('fulfilled');
+      expect(segunda.status).toBe('rejected');
+      const error = (segunda as PromiseRejectedResult).reason;
+      expect(error).toBeInstanceOf(ErrorNegocio);
+      expect(error.codigo).toBe(CODIGOS_ERROR.ESTADO_RESERVA_INVALIDO);
+      expect(error.getStatus()).toBe(409);
+      expect(reservas.cancelar).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('reprogramarPropia', () => {
+    const datos = { inicioEn: '2026-11-07T15:00:00.000Z', barberoId: ID.barbero, tokenTurnstile: 't' };
+
+    it('reprograma marcando que viene del cliente, sin actor', async () => {
+      await servicio.reprogramarPropia(resuelta(), datos);
+      expect(reservas.reprogramar).toHaveBeenCalledWith(
+        ID.reserva,
+        { inicioEn: '2026-11-07T15:00:00.000Z', barberoId: ID.barbero, notificar: true },
+        null,
+        true,
+      );
+    });
+
+    it('el cliente no puede mover la cita de sede ni colar otros campos', async () => {
+      await servicio.reprogramarPropia(resuelta(), { ...datos, sedeId: ID.sede, motivo: 'x' } as never);
+      expect(Object.keys(reservas.reprogramar.mock.calls[0]![1]).sort()).toEqual(
+        ['barberoId', 'inicioEn', 'notificar'].sort(),
+      );
+    });
+
+    it('devuelve el token nuevo, el de la relectura y no el de la fila del guard', async () => {
+      const respuesta = await servicio.reprogramarPropia(resuelta(), datos);
+      expect(respuesta.tokenGestion).toBe('tok_relectura');
+      expect(respuesta.tokenGestion).not.toBe('tok_guard');
+      expect(prisma.reserva.findUnique.mock.calls[0]![0].where).toEqual({ id: ID.reserva });
+    });
+
+    it('si falta el token tras reprogramar, es un fallo del servidor con el código de la cita', async () => {
+      prisma.reserva.findUnique.mockResolvedValue(filaPublica({ tokenGestion: null }));
+      await expect(servicio.reprogramarPropia(resuelta(), datos)).rejects.toThrow(/CDS-A1B2/);
+    });
+
+    it('no filtra la nota interna', async () => {
+      const respuesta = await servicio.reprogramarPropia(resuelta(), datos);
+      expect(JSON.stringify(respuesta)).not.toMatch(/NOTA INTERNA|tok_guard/);
+    });
+  });
+});

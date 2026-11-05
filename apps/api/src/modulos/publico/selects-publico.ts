@@ -40,3 +40,25 @@ export const SELECT_BARBERO = {
   sedeId: true,
   sedesPermitidas: { select: { sedeId: true } },
 } as const;
+
+/**
+ * La cita tal como la emite `aReservaPublica`, y nada más. El `include` de
+ * `ReservasService` es el del panel: trae la sede sin `ciudad`, `telefono` ni
+ * `mapsUrl` y el barbero sin `bio`, así que tras escribir se relee con este
+ * `select`. `tokenGestion` se pide para las respuestas que lo devuelven (crear
+ * y reprogramar); el mapeador no lo emite, así que `miReserva` no lo expone.
+ */
+export const SELECT_RESERVA_PUBLICA = {
+  codigo: true,
+  estado: true,
+  inicioEn: true,
+  finEn: true,
+  total: true,
+  tokenGestion: true,
+  sede: { select: SELECT_SEDE },
+  barbero: { select: SELECT_BARBERO_PUBLICO },
+  servicios: {
+    select: { nombreSnapshot: true, precioSnapshot: true, duracionSnapshot: true },
+    orderBy: { orden: 'asc' },
+  },
+} as const;

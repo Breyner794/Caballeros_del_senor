@@ -1,15 +1,20 @@
 import { Body, Controller, Get, Post, Query, UseGuards } from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import {
+  cancelarReservaPublicaSchema,
   consultarCalendarioPublicoSchema,
   consultarDisponibilidadPublicaSchema,
   crearReservaPublicaSchema,
+  reprogramarReservaPublicaSchema,
+  type CancelarReservaPublicaDto,
   type ConsultarCalendarioPublicoDto,
   type ConsultarDisponibilidadPublicaDto,
   type CrearReservaPublicaDto,
+  type ReprogramarReservaPublicaDto,
 } from '@cds/shared';
 import { Publico } from '../../comun/autenticacion/decoradores.js';
 import { validar } from '../../comun/validacion/zod.pipe.js';
+import { GuardTokenGestion, ReservaPorToken, type ReservaResuelta } from './guard-token-gestion.js';
 import { GuardTurnstile } from './guard-turnstile.js';
 import { PublicoReservasService } from './publico-reservas.service.js';
 import { PublicoService } from './publico.service.js';
@@ -62,5 +67,43 @@ export class PublicoController {
   @UseGuards(GuardTurnstile)
   crearReserva(@Body(validar(crearReservaPublicaSchema)) datos: CrearReservaPublicaDto) {
     return this.reservas.crearReserva(datos);
+  }
+
+  /**
+   * La cita del cliente, con `puedeCancelar` y `puedeReprogramar`. Se
+   * autentica con el token de gestión (cabecera `X-Token-Gestion`), que el
+   * frontend lee del fragmento del enlace.
+   */
+  @Get('mi-reserva')
+  @Publico()
+  @UseGuards(GuardTokenGestion)
+  miReserva(@ReservaPorToken() reserva: ReservaResuelta) {
+    return this.reservas.miReserva(reserva);
+  }
+
+  /**
+   * Los POST de gestión llevan además Turnstile: son escrituras sin sesión que
+   * se pueden enumerar. Turnstile va primero para frenar al bot antes de que
+   * cada intento llegue a consultar un token.
+   */
+  @Post('mi-reserva/cancelar')
+  @Publico()
+  @UseGuards(GuardTurnstile, GuardTokenGestion)
+  cancelarMiReserva(
+    @ReservaPorToken() reserva: ReservaResuelta,
+    @Body(validar(cancelarReservaPublicaSchema)) datos: CancelarReservaPublicaDto,
+  ) {
+    return this.reservas.cancelarPropia(reserva, datos);
+  }
+
+  /** Devuelve el `tokenGestion` nuevo: el enlace anterior deja de servir. */
+  @Post('mi-reserva/reprogramar')
+  @Publico()
+  @UseGuards(GuardTurnstile, GuardTokenGestion)
+  reprogramarMiReserva(
+    @ReservaPorToken() reserva: ReservaResuelta,
+    @Body(validar(reprogramarReservaPublicaSchema)) datos: ReprogramarReservaPublicaDto,
+  ) {
+    return this.reservas.reprogramarPropia(reserva, datos);
   }
 }

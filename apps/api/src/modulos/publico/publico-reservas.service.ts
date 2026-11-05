@@ -1,39 +1,27 @@
 import { Injectable } from '@nestjs/common';
-import { CODIGOS_ERROR, ESTADOS_QUE_OCUPAN } from '@cds/shared';
-import type { CrearReservaPublicaDto, ReservaPublica } from '@cds/shared';
+import { CODIGOS_ERROR, ESTADOS_QUE_OCUPAN, puedeTransicionar } from '@cds/shared';
+import type {
+  CancelarReservaPublicaDto,
+  CrearReservaPublicaDto,
+  EstadoReserva,
+  MiReservaPublica,
+  ReprogramarReservaPublicaDto,
+  ReservaPublica,
+} from '@cds/shared';
 import { PrismaService } from '../../comun/prisma/prisma.service.js';
 import { ConfiguracionNegocioService } from '../../comun/configuracion/configuracion-negocio.service.js';
 import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
 import { aFechaLocal, limitesDelRango } from '../../comun/tiempo/tiempo.js';
 import { DisponibilidadService } from '../disponibilidad/disponibilidad.service.js';
 import { ReservasService } from '../reservas/reservas.service.js';
-import { aReservaPublica } from './dto-publico.js';
+import { aReservaPublica, type ReservaEntrada } from './dto-publico.js';
+import type { ReservaResuelta } from './guard-token-gestion.js';
 import { PublicoService } from './publico.service.js';
-import { SELECT_BARBERO_PUBLICO, SELECT_SEDE } from './selects-publico.js';
+import { SELECT_RESERVA_PUBLICA } from './selects-publico.js';
 
 /**
- * Lo que la respuesta de crear necesita, y nada más. El `include` de
- * `ReservasService.crear` es el del panel: trae la sede sin `ciudad`,
- * `telefono` ni `mapsUrl` y el barbero sin `bio`, así que se relee con el
- * `select` público. `tokenGestion` sale una sola vez, en esta respuesta.
- */
-const SELECT_RESERVA_PUBLICA = {
-  codigo: true,
-  estado: true,
-  inicioEn: true,
-  finEn: true,
-  total: true,
-  tokenGestion: true,
-  sede: { select: SELECT_SEDE },
-  barbero: { select: SELECT_BARBERO_PUBLICO },
-  servicios: {
-    select: { nombreSnapshot: true, precioSnapshot: true, duracionSnapshot: true },
-    orderBy: { orden: 'asc' },
-  },
-} as const;
-
-/**
- * Camino de escritura del canal público: elegir barbero y crear la cita.
+ * Camino de escritura del canal público: elegir barbero, crear la cita y
+ * gestionarla después con el token (ver, cancelar, reprogramar).
  *
  * Aparte de `PublicoService` porque es otra responsabilidad: lo que la web
  * puede hacer con la agenda (reservar, y después gestionar por token) frente a
@@ -191,20 +179,112 @@ export class PublicoReservasService {
       throw await this.conHuecosSiSeOcupo(error, datos, servicioIds, inicioEn);
     }
 
+    const fila = await this.releerTrasEscribir(creada);
+    return { ...aReservaPublica(fila), tokenGestion: fila.tokenGestion };
+  }
+
+  // ------------------------------------------- Gestión con el token de la cita
+
+  /**
+   * La cita del cliente, con lo que el frontend necesita para decidir qué
+   * botones ofrecer. La reserva que entrega el guard es la fila interna (con
+   * token, nota interna y ficha del cliente): aquí solo se usa su `id`, y la
+   * respuesta sale de una relectura con el `select` público y los mapeadores.
+   */
+  async miReserva(reserva: ReservaResuelta): Promise<MiReservaPublica> {
     const fila = await this.prisma.reserva.findUnique({
-      where: { id: creada.id },
+      where: { id: reserva.id },
+      select: SELECT_RESERVA_PUBLICA,
+    });
+    if (!fila) throw new ErrorNegocio(CODIGOS_ERROR.RECURSO_NO_ENCONTRADO, 404);
+    return this.conBanderas(fila);
+  }
+
+  /**
+   * Cancela la cita del cliente. El origen `CLIENTE` es lo que activa el plazo
+   * (`horasLimiteCancelacion`) en el dominio: con otro valor no habría error,
+   * solo se saltaría la regla. Si dos peticiones cancelan a la vez con el mismo
+   * token, la segunda recibe `ESTADO_RESERVA_INVALIDO` del dominio, que vuelve a
+   * leer el estado antes de escribir; aquí ese error se deja pasar tal cual.
+   * El dominio anula el token al cancelar: no se replica.
+   */
+  async cancelarPropia(
+    reserva: ReservaResuelta,
+    datos: CancelarReservaPublicaDto,
+  ): Promise<MiReservaPublica> {
+    // `tokenTurnstile` es del canal y no llega al dominio; `notificar` toma el
+    // valor por defecto del esquema del panel.
+    await this.reservas.cancelar(reserva.id, { motivo: datos.motivo, notificar: true }, null, 'CLIENTE');
+    // La cita cancelada ya no tiene token (el dominio lo anuló): se relee sin exigirlo.
+    const fila = await this.prisma.reserva.findUnique({
+      where: { id: reserva.id },
+      select: SELECT_RESERVA_PUBLICA,
+    });
+    if (!fila) {
+      throw new Error(`La reserva ${reserva.codigo} (${reserva.id}) se canceló pero no se pudo releer`);
+    }
+    return this.conBanderas(fila);
+  }
+
+  /**
+   * Mueve la cita del cliente a otra hora (y, si quiere, a otro barbero de la
+   * misma sede: la sede no se puede cambiar desde la web). El dominio rota el
+   * token cuando reprograma el cliente, y el valor nuevo se devuelve aquí porque
+   * es la única forma de que lo reciba: el enlace viejo deja de servir.
+   */
+  async reprogramarPropia(
+    reserva: ReservaResuelta,
+    datos: ReprogramarReservaPublicaDto,
+  ): Promise<MiReservaPublica & { tokenGestion: string }> {
+    await this.reservas.reprogramar(
+      reserva.id,
+      { inicioEn: datos.inicioEn, barberoId: datos.barberoId, notificar: true },
+      null,
+      true,
+    );
+    const fila = await this.releerTrasEscribir(reserva);
+    return { ...(await this.conBanderas(fila)), tokenGestion: fila.tokenGestion };
+  }
+
+  /**
+   * Relee la cita recién escrita con el `select` público. Exige el token: solo
+   * se llama tras crear o reprogramar, donde el cliente lo necesita.
+   */
+  private async releerTrasEscribir(escrita: { id: string; codigo: string }) {
+    const fila = await this.prisma.reserva.findUnique({
+      where: { id: escrita.id },
       select: SELECT_RESERVA_PUBLICA,
     });
     if (!fila?.tokenGestion) {
-      // La cita ya está guardada: que falte su lectura es un fallo del servidor.
-      // El token sale una sola vez, así que el cliente se queda sin su llave: el
-      // código en el mensaje (que el filtro global registra) permite a soporte
-      // localizar la cita en lugar de buscarla a ciegas.
+      // La escritura ya está hecha: que falte la relectura es un fallo del servidor.
+      // Si era un token nuevo, el cliente se queda sin su llave: el código en el
+      // mensaje (que el filtro global registra) permite a soporte localizar la
+      // cita en lugar de buscarla a ciegas.
       throw new Error(
-        `La reserva ${creada.codigo} (${creada.id}) se guardó pero no se pudo releer: el cliente no recibió su token de gestión`,
+        `La reserva ${escrita.codigo} (${escrita.id}) se guardó pero no se pudo releer: el cliente no recibió su token de gestión`,
       );
     }
-    return { ...aReservaPublica(fila), tokenGestion: fila.tokenGestion };
+    return fila as typeof fila & { tokenGestion: string };
+  }
+
+  /**
+   * `puedeCancelar` y `puedeReprogramar` replican lo que el dominio comprueba al
+   * rechazar (`ReservasService.cancelar` y `.reprogramar`): estado que lo
+   * permite y horas que faltan (desde ahora hasta el inicio) no inferiores al
+   * límite de su propia configuración. Son dos límites distintos. Solo informan:
+   * quien decide es el dominio, que vuelve a comprobarlo al escribir.
+   */
+  private async conBanderas(fila: ReservaEntrada): Promise<MiReservaPublica> {
+    const config = await this.configuracion.obtener();
+    const estado = fila.estado as EstadoReserva;
+    const horasHasta = (fila.inicioEn.getTime() - Date.now()) / 3_600_000;
+    return {
+      ...aReservaPublica(fila),
+      puedeCancelar:
+        puedeTransicionar(estado, 'CANCELADA') && horasHasta >= config.horasLimiteCancelacion,
+      puedeReprogramar:
+        ['PENDIENTE', 'CONFIRMADA'].includes(estado) && horasHasta >= config.horasLimiteReprogramacion,
+    };
   }
 
   /**
