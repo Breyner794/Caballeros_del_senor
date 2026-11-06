@@ -98,7 +98,7 @@ export function PasoFecha({
         >
           ‹
         </button>
-        <h3 className="font-semibold capitalize" aria-live="polite">
+        <h3 className="font-semibold first-letter:uppercase" aria-live="polite">
           {etiquetaMes(mes)}
         </h3>
         <button

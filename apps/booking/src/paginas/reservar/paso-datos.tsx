@@ -205,7 +205,7 @@ export function PasoDatos({
       <section aria-label="Resumen de tu cita" className="bg-muted/50 space-y-1 rounded-xl p-4 text-sm">
         <p className="font-medium">{estado.servicios.map((s) => s.nombre).join(' + ')}</p>
         {estado.fecha && estado.hueco ? (
-          <p className="capitalize">
+          <p className="first-letter:uppercase">
             {etiquetaFecha(estado.fecha)} · {etiquetaHora(estado.hueco.hora)}
           </p>
         ) : null}

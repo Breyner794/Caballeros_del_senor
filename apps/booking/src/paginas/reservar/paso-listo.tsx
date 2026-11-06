@@ -39,7 +39,7 @@ export function PasoListo({ reserva, zonaHoraria, moneda }: Props) {
       </section>
 
       <section aria-label="Detalle de tu cita" className="bg-muted/50 space-y-1 rounded-xl p-4">
-        <p className="font-medium capitalize">{etiquetaFechaHora(reserva.inicioEn, zonaHoraria)}</p>
+        <p className="font-medium first-letter:uppercase">{etiquetaFechaHora(reserva.inicioEn, zonaHoraria)}</p>
         <p>{reserva.servicios.map((s) => s.nombre).join(' + ')}</p>
         <p className="text-muted-foreground text-sm">
           {reserva.sede.nombre}

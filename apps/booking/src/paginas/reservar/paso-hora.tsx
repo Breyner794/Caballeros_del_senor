@@ -49,7 +49,7 @@ export function PasoHora({
 
   return (
     <div className="space-y-5">
-      <p className="text-muted-foreground capitalize">{etiquetaFecha(fecha)}</p>
+      <p className="text-muted-foreground first-letter:uppercase">{etiquetaFecha(fecha)}</p>
 
       {barberos && barberos.length > 0 ? (
         <Campo etiqueta="Barbero">
