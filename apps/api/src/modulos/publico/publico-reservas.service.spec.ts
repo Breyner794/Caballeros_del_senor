@@ -69,6 +69,13 @@ describe('PublicoReservasService.elegirBarbero', () => {
       trabaja,
     );
 
+  /** El hueco de `INICIO` existe en la rejilla, pero la antelación mínima lo cierra. */
+  const cerradoPorAntelacion = (barberoId: string) =>
+    agenda(
+      barberoId,
+      huecosDe([], { '10:00': 'ANTELACION' }).map((h) => ({ ...h, inicioEn: INICIO.toISOString() })),
+    );
+
   const pedir = () => servicio.elegirBarbero({ sedeId: SEDE_A, inicioEn: INICIO, servicioIds: [SERVICIO] });
 
   beforeEach(() => {
@@ -217,6 +224,29 @@ describe('PublicoReservasService.elegirBarbero', () => {
       codigo: CODIGOS_ERROR.RESERVA_SOLAPADA,
       status: 409,
     });
+  });
+
+  it('lanza ANTELACION_INSUFICIENTE si el hueco existe pero la antelación mínima lo cierra', async () => {
+    // Sin esto el cliente leería «ese horario se ocupó» ante un hueco que nadie ocupó.
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([
+        cerradoPorAntelacion(B1),
+      ]),
+    );
+    await expect(pedir()).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.ANTELACION_INSUFICIENTE,
+      status: 400,
+    });
+  });
+
+  it('un hueco cerrado por antelación en un barbero oculto no cambia el motivo', async () => {
+    prisma.usuario.findMany.mockResolvedValue([]);
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([
+        cerradoPorAntelacion(B1),
+      ]),
+    );
+    await expect(pedir()).rejects.toMatchObject({ codigo: CODIGOS_ERROR.RESERVA_SOLAPADA });
   });
 
   it('lanza RESERVA_SOLAPADA si los únicos libres no son visibles', async () => {

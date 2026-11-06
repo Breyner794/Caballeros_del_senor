@@ -199,6 +199,21 @@ describe('ReservasService.crear', () => {
     expect(entorno.auditoria.registrar).toHaveBeenCalledTimes(1);
   });
 
+  it('un interbloqueo al escribir (la carrera por el mismo hueco) se traduce a RESERVA_SOLAPADA', async () => {
+    const entorno = montar();
+    prepararCreacionFeliz(entorno);
+    entorno.prisma.reserva.create.mockRejectedValue(
+      new Prisma.PrismaClientUnknownRequestError('PostgresError { code: "40P01", message: "deadlock detected" }', {
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(entorno.servicio.crear(datosCrear(), actorRecepcion())).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.RESERVA_SOLAPADA,
+      status: 409,
+    });
+  });
+
   it('calcula fin, fin con buffer, subtotal y total a partir de los servicios', async () => {
     const entorno = montar();
     prepararCreacionFeliz(entorno, [
@@ -1238,6 +1253,41 @@ describe('ReservasService.cancelar', () => {
       }),
     );
     expect(entorno.clientes.recalcularMetricas).toHaveBeenCalledWith(ID.cliente);
+  });
+
+  it('escribe solo si el estado sigue siendo el que leyó: la condición viaja en el where', async () => {
+    const entorno = montar();
+    prepararCancelacion(entorno, reserva({ estado: 'PENDIENTE' }));
+
+    await entorno.servicio.cancelar(ID.reserva, { notificar: true }, actorRecepcion());
+
+    expect(entorno.prisma.reserva.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: ID.reserva, estado: 'PENDIENTE' } }),
+    );
+  });
+
+  it('si otra petición la canceló entre la lectura y la escritura, responde ESTADO_RESERVA_INVALIDO', async () => {
+    const entorno = montar();
+    prepararCancelacion(entorno);
+    entorno.prisma.reserva.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Record to update not found', {
+        code: 'P2025',
+        clientVersion: 'test',
+      }),
+    );
+    // La relectura que informa del estado actual ya ve la cita cancelada.
+    entorno.prisma.reserva.findUnique
+      .mockResolvedValueOnce(reserva())
+      .mockResolvedValue({ estado: 'CANCELADA' });
+
+    await expect(
+      entorno.servicio.cancelar(ID.reserva, { notificar: true }, null, 'CLIENTE'),
+    ).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.ESTADO_RESERVA_INVALIDO,
+      detalle: { estadoActual: 'CANCELADA' },
+    });
+    expect(entorno.auditoria.registrar).not.toHaveBeenCalled();
+    expect(entorno.clientes.recalcularMetricas).not.toHaveBeenCalled();
   });
 
   it.each(['PENDIENTE', 'CONFIRMADA', 'EN_CURSO'])(

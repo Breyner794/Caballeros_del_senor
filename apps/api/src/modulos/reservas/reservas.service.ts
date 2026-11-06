@@ -108,7 +108,7 @@ export class ReservasService {
     const config = await this.configuracion.obtener();
     const confirmar = desdeWeb ? !config.requiereConfirmacion : datos.confirmar;
 
-    const reserva = await this.prisma.$transaction(async (tx) => {
+    const reserva = await this.escribirCita(async (tx) => {
       const creada = await this.insertarReserva(tx, {
         clienteId,
         sedeId: datos.sedeId,
@@ -192,7 +192,7 @@ export class ReservasService {
     const clienteId = (await this.resolverCliente(datos, actor)) ?? (await this.clientes.clienteGenerico()).id;
     const turno = await this.siguienteTurno(datos.barberoId, inicioEn, zona);
 
-    const reserva = await this.prisma.$transaction(async (tx) =>
+    const reserva = await this.escribirCita(async (tx) =>
       this.insertarReserva(tx, {
         clienteId,
         sedeId: datos.sedeId,
@@ -496,18 +496,37 @@ export class ReservasService {
       }
     }
 
-    const despues = await this.prisma.reserva.update({
-      where: { id },
-      data: {
-        estado: 'CANCELADA',
-        canceladaEn: new Date(),
-        canceladaPor: origen,
-        motivoCancelacion: datos.motivo,
-        // Una cita cancelada no se gestiona más: el enlace deja de servir.
-        tokenGestion: null,
-      },
-      include: INCLUDE_RESERVA,
-    });
+    // Comparar y escribir en un solo paso: `where` lleva el estado que se leyó
+    // arriba. Entre ese `obtener` y este `update` hay una ventana: dos
+    // peticiones que cancelan a la vez (el cliente con el enlace, o él y la
+    // recepción) leen las dos «CONFIRMADA». Sin esta condición ganaban las dos:
+    // la segunda pisaba la fecha y el motivo de la primera, recalculaba las
+    // métricas otra vez y dejaba dos asientos de auditoría. Con ella, la
+    // segunda no encuentra fila y recibe el mismo error que si hubiera llegado
+    // un instante después.
+    let despues;
+    try {
+      despues = await this.prisma.reserva.update({
+        where: { id, estado: antes.estado },
+        data: {
+          estado: 'CANCELADA',
+          canceladaEn: new Date(),
+          canceladaPor: origen,
+          motivoCancelacion: datos.motivo,
+          // Una cita cancelada no se gestiona más: el enlace deja de servir.
+          tokenGestion: null,
+        },
+        include: INCLUDE_RESERVA,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        const actual = await this.prisma.reserva.findUnique({ where: { id }, select: { estado: true } });
+        throw new ErrorNegocio(CODIGOS_ERROR.ESTADO_RESERVA_INVALIDO, 409, {
+          estadoActual: actual?.estado,
+        });
+      }
+      throw error;
+    }
 
     // El hueco queda libre al instante: la restricción de exclusión solo mira
     // los estados que ocupan tiempo, y CANCELADA no es uno de ellos.
@@ -862,6 +881,21 @@ export class ReservasService {
       ),
       cuentaFidelidad: ordenados.some((s) => s.cuentaFidelidad),
     };
+  }
+
+  /**
+   * Transacción que escribe una cita nueva. Un interbloqueo aquí es la carrera
+   * por el mismo hueco (ver `PrismaService.esInterbloqueo`): se traduce igual
+   * que la violación de la restricción de exclusión, para que el perdedor lea
+   * «ese horario acaba de ocuparse» y no un error 500.
+   */
+  private async escribirCita<T>(escribir: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    try {
+      return await this.prisma.$transaction(escribir);
+    } catch (error) {
+      if (PrismaService.esInterbloqueo(error)) throw new ErrorNegocio(CODIGOS_ERROR.RESERVA_SOLAPADA, 409);
+      throw error;
+    }
   }
 
   private async insertarReserva(

@@ -7,6 +7,7 @@ export const CODIGOS_POSTGRES = {
   VIOLACION_EXCLUSION: '23P01',
   VIOLACION_CHECK: '23514',
   VIOLACION_FK: '23503',
+  INTERBLOQUEO: '40P01',
 } as const;
 
 @Injectable()
@@ -71,6 +72,23 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
     ].join(' ');
 
     return texto.includes(nombreRestriccion);
+  }
+
+  /**
+   * ¿El motor abortó la transacción por un interbloqueo (`40P01`)?
+   *
+   * Con una restricción de exclusión, dos inserciones que chocan pueden acabar
+   * de dos maneras: si una llega antes, la otra espera y recibe `23P01`; si las
+   * dos ya han escrito su fila cuando comprueban el índice, cada una espera a la
+   * otra y Postgres aborta a una con `40P01`. Es la misma carrera y el mismo
+   * perdedor: quien escribe una cita debe tratar los dos errores por igual.
+   */
+  static esInterbloqueo(error: unknown): boolean {
+    if (error instanceof Prisma.PrismaClientKnownRequestError) return error.code === 'P2034';
+    return (
+      error instanceof Prisma.PrismaClientUnknownRequestError &&
+      error.message.includes(CODIGOS_POSTGRES.INTERBLOQUEO)
+    );
   }
 
   static esDuplicado(error: unknown): boolean {

@@ -1,7 +1,40 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import ts from 'typescript';
+import { defineConfig, type Plugin } from 'vitest/config';
 
 const raiz = fileURLToPath(new URL('.', import.meta.url));
+
+/**
+ * esbuild (el transformador de Vite) no emite los metadatos de decoradores
+ * (`emitDecoratorMetadata`), y sin ellos Nest no sabe qué inyectar en cada
+ * constructor: el contenedor ve parámetros `undefined`. Las unitarias no lo
+ * notan porque construyen los servicios a mano; la prueba de arranque, que usa el
+ * contenedor de verdad, sí. Se compila `src/` con el propio compilador de
+ * TypeScript solo en esta configuración, así `pnpm test` sigue igual de rápido.
+ */
+function metadatosDeDecoradores(): Plugin {
+  return {
+    name: 'metadatos-de-decoradores',
+    enforce: 'pre',
+    transform(codigo, id) {
+      const ruta = id.split('?')[0]!.replaceAll('\\', '/');
+      if (!ruta.endsWith('.ts') || !ruta.includes('/apps/api/src/') || !codigo.includes('@')) {
+        return null;
+      }
+      const { outputText, sourceMapText } = ts.transpileModule(codigo, {
+        fileName: ruta,
+        compilerOptions: {
+          target: ts.ScriptTarget.ES2023,
+          module: ts.ModuleKind.ESNext,
+          experimentalDecorators: true,
+          emitDecoratorMetadata: true,
+          sourceMap: true,
+        },
+      });
+      return { code: outputText, map: sourceMapText ?? null };
+    },
+  };
+}
 
 /**
  * Pruebas de integración: Postgres de verdad.
@@ -20,6 +53,7 @@ const raiz = fileURLToPath(new URL('.', import.meta.url));
  * Ejecución:   `pnpm --filter @cds/api test:integracion`
  */
 export default defineConfig({
+  plugins: [metadatosDeDecoradores()],
   resolve: {
     alias: {
       '@cds/shared': fileURLToPath(new URL('../../packages/shared/src/index.ts', import.meta.url)),
