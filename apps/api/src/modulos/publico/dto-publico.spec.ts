@@ -63,7 +63,7 @@ describe('aReservaPublica', () => {
 
   it('las líneas salen como servicios reservados, sin descripción ni incluye', () => {
     const [linea] = aReservaPublica(reserva()).servicios;
-    expect(ordenadas(linea!)).toEqual(['duracionMinutos', 'nombre', 'precio']);
+    expect(ordenadas(linea!)).toEqual(['duracionMinutos', 'nombre', 'precio', 'servicioId']);
     expect(linea).toMatchObject({ nombre: 'Corte clásico', precio: 30000, duracionMinutos: 30 });
   });
 
@@ -95,7 +95,7 @@ describe('aServicioPublico', () => {
 describe('aServicioReservado', () => {
   it('el servicio reservado tiene exactamente estas claves', () => {
     expect(ordenadas(aServicioReservado(lineaServicio()))).toEqual([
-      'duracionMinutos', 'nombre', 'precio',
+      'duracionMinutos', 'nombre', 'precio', 'servicioId',
     ]);
   });
 
@@ -103,7 +103,12 @@ describe('aServicioReservado', () => {
     const salida = aServicioReservado(
       lineaServicio({ nombreSnapshot: 'Corte viejo', precioSnapshot: new Prisma.Decimal(25000) }),
     );
-    expect(salida).toEqual({ nombre: 'Corte viejo', precio: 25000, duracionMinutos: 30 });
+    expect(salida).toEqual({
+      servicioId: ID.servicioCorte,
+      nombre: 'Corte viejo',
+      precio: 25000,
+      duracionMinutos: 30,
+    });
   });
 });
 
@@ -182,7 +187,9 @@ describe('contrato de tipos', () => {
 
   it('la reserva pública lista servicios reservados, no del catálogo', () => {
     expectTypeOf<ReservaPublica['servicios']>().toEqualTypeOf<ServicioReservado[]>();
-    expectTypeOf<keyof ServicioReservado>().toEqualTypeOf<'nombre' | 'precio' | 'duracionMinutos'>();
+    expectTypeOf<keyof ServicioReservado>().toEqualTypeOf<
+      'servicioId' | 'nombre' | 'precio' | 'duracionMinutos'
+    >();
   });
 
   it('el barbero público no tiene campo alias', () => {

@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
 import {
   cancelarReservaPublicaSchema,
+  consultarDisponibilidadPublicaSchema,
   crearReservaPublicaSchema,
   reprogramarReservaPublicaSchema,
 } from '@cds/shared';
@@ -158,6 +159,38 @@ describe('PublicoController: mi-reserva', () => {
     for (const ruta of [proto.miReserva, proto.cancelarMiReserva, proto.reprogramarMiReserva]) {
       expect(Reflect.getMetadata('__guards__', ruta)).toContain(GuardTokenGestion);
     }
+  });
+
+  it('la disponibilidad de la propia cita es un GET bajo mi-reserva, con token y sin captcha', () => {
+    expect(Reflect.getMetadata('method', proto.miDisponibilidad)).toBe(GET);
+    expect(Reflect.getMetadata('path', proto.miDisponibilidad)).toBe('mi-reserva/disponibilidad');
+    expect(Reflect.getMetadata(CLAVE_PUBLICO, proto.miDisponibilidad)).toBe(true);
+    expect(Reflect.getMetadata('__guards__', proto.miDisponibilidad)).toContain(GuardTokenGestion);
+    expect(Reflect.getMetadata('__guards__', proto.miDisponibilidad)).not.toContain(GuardTurnstile);
+  });
+
+  it('la disponibilidad pública NO excluye ninguna reserva, mande lo que mande el cliente', async () => {
+    const { controlador, servicio } = montar();
+    const filtros = validarCon(consultarDisponibilidadPublicaSchema, {
+      sedeId: ID.sede,
+      fecha: '2026-11-09',
+      servicioIds: ID.servicioCorte,
+      excluirReservaId: ID.reserva,
+    });
+    await controlador.disponibilidad(filtros);
+    expect(servicio.disponibilidad.mock.calls[0]).toHaveLength(1);
+    expect(filtros).not.toHaveProperty('excluirReservaId');
+  });
+
+  it('miDisponibilidad excluye la cita que resolvió el token', async () => {
+    const { controlador, servicio } = montar();
+    const filtros = validarCon(consultarDisponibilidadPublicaSchema, {
+      sedeId: ID.sede,
+      fecha: '2026-11-09',
+      servicioIds: ID.servicioCorte,
+    });
+    await controlador.miDisponibilidad(reservaDelGuard, filtros);
+    expect(servicio.disponibilidad).toHaveBeenCalledWith(filtros, ID.reserva);
   });
 
   it('Turnstile solo en los POST', () => {

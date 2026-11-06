@@ -234,6 +234,20 @@ describe('PublicoService.disponibilidad', () => {
     );
   });
 
+  it('sin excluir nada no manda excluirReservaId al motor', async () => {
+    await consultar();
+    expect(disponibilidad.delDia).toHaveBeenCalledWith(
+      expect.not.objectContaining({ excluirReservaId: expect.anything() }),
+    );
+  });
+
+  it('al reprogramar pasa excluirReservaId para que la cita no choque consigo misma', async () => {
+    await servicio.disponibilidad({ sedeId: SEDE_A, fecha: FECHA, servicioIds: [SERVICIO] }, 'reserva-propia');
+    expect(disponibilidad.delDia).toHaveBeenCalledWith(
+      expect.objectContaining({ excluirReservaId: 'reserva-propia', aplicarReglasCliente: true }),
+    );
+  });
+
   it('sin barbero elegido devuelve la unión de huecos libres de la sede', async () => {
     const { huecos } = await consultar();
     expect(huecos.map((h) => [h.hora, h.disponible])).toEqual([

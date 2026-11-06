@@ -48,6 +48,23 @@ export class PublicoController {
     return this.servicio.disponibilidad(filtros);
   }
 
+  /**
+   * Los huecos de un día para quien reprograma: igual que `disponibilidad`, pero
+   * su propia cita no cuenta como ocupada (si no, mover la cita media hora
+   * chocaría consigo misma). El cliente no manda ningún id: la cita es la que
+   * resolvió el token. No se acepta `excluirReservaId` en la ruta pública, que
+   * dejaría a cualquiera ocultar una reserva ajena de la rejilla.
+   */
+  @Get('mi-reserva/disponibilidad')
+  @Publico()
+  @UseGuards(GuardTokenGestion)
+  miDisponibilidad(
+    @ReservaPorToken() reserva: ReservaResuelta,
+    @Query(validar(consultarDisponibilidadPublicaSchema)) filtros: ConsultarDisponibilidadPublicaDto,
+  ) {
+    return this.servicio.disponibilidad(filtros, reserva.id);
+  }
+
   /** Qué días del rango tienen algún hueco. */
   @Get('calendario')
   @Publico()

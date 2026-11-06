@@ -66,6 +66,7 @@ export interface HuecoEntrada {
 
 /** Línea congelada de la reserva: nombre, precio y duración de cuando se reservó. */
 export interface LineaReservaEntrada {
+  servicioId: string;
   nombreSnapshot: string;
   precioSnapshot: Numerico;
   duracionSnapshot: number;
@@ -132,6 +133,7 @@ export function aHuecoPublico(hueco: HuecoEntrada): HuecoPublico {
 /** Sobre el snapshot, nunca sobre el catálogo vivo: el precio es el de la fecha de la reserva. */
 export function aServicioReservado(linea: LineaReservaEntrada): ServicioReservado {
   return {
+    servicioId: linea.servicioId,
     nombre: linea.nombreSnapshot,
     precio: aNumero(linea.precioSnapshot),
     duracionMinutos: linea.duracionSnapshot,

@@ -300,6 +300,41 @@ describe('token de gestión', () => {
   });
 });
 
+// ===================== reprogramar: la rejilla de la propia cita ==============
+
+describe('disponibilidad de quien reprograma', () => {
+  it('la cita devuelve el id del servicio reservado, para pedir la agenda sin emparejar por nombre', async () => {
+    const creada = await publico.crearReserva(cuerpo(30));
+    expect(creada.servicios.map((s) => s.servicioId)).toEqual([IDS_PUBLICO.servicio]);
+    const relectura = await publico.miReserva(await resolverToken(creada.tokenGestion));
+    expect(relectura.servicios.map((s) => s.servicioId)).toEqual([IDS_PUBLICO.servicio]);
+  });
+
+  it('su propia hora aparece ocupada para el público, pero libre al excluir la cita', async () => {
+    const creada = await publico.crearReserva(cuerpo(31, { barberoId: IDS_PUBLICO.barberoA }));
+    const resuelta = await resolverToken(creada.tokenGestion);
+    const consulta = { sedeId: IDS_PUBLICO.sede, fecha: DIA, servicioIds: [IDS_PUBLICO.servicio], barberoId: resuelta.barberoId };
+
+    const comoPublico = await lecturas.disponibilidad(consulta);
+    expect(comoPublico.huecos.find((h) => h.inicioEn === DIEZ)?.disponible).toBe(false);
+
+    const comoDuenio = await lecturas.disponibilidad(consulta, resuelta.id);
+    expect(comoDuenio.huecos.find((h) => h.inicioEn === DIEZ)?.disponible).toBe(true);
+  });
+
+  it('excluir la propia cita no libera las de otros', async () => {
+    const creada = await publico.crearReserva(cuerpo(32, { barberoId: IDS_PUBLICO.barberoA }));
+    const resuelta = await resolverToken(creada.tokenGestion);
+    await insertarCita({ barberoId: IDS_PUBLICO.barberoA, inicioEn: horaDeBogota(DIA, '11:00') });
+
+    const { huecos } = await lecturas.disponibilidad(
+      { sedeId: IDS_PUBLICO.sede, fecha: DIA, servicioIds: [IDS_PUBLICO.servicio], barberoId: resuelta.barberoId },
+      resuelta.id,
+    );
+    expect(huecos.find((h) => h.inicioEn === horaDeBogota(DIA, '11:00'))?.disponible).toBe(false);
+  });
+});
+
 // ============================= visibleWeb ====================================
 
 describe('barbero oculto en la web, con el filtro aplicado por la base', () => {

@@ -562,6 +562,7 @@ describe('PublicoReservasService.crearReserva', () => {
       fotoUrl: true,
     });
     expect(select.servicios.select).toEqual({
+      servicioId: true,
       nombreSnapshot: true,
       precioSnapshot: true,
       duracionSnapshot: true,

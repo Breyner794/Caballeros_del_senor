@@ -100,6 +100,8 @@ export class PublicoService {
    */
   async disponibilidad(
     filtros: ConsultarDisponibilidadPublicaDto,
+    /** Solo al reprogramar: la cita del cliente no cuenta como ocupada. Lo pone el servidor, nunca el cliente. */
+    excluirReservaId?: string,
   ): Promise<{ fecha: string; laborable: boolean; huecos: HuecoPublico[] }> {
     // `delDia` no acota la fecha (eso lo hace `validarHueco` al crear): se
     // recorta aquí el rango de consulta, igual que en el calendario.
@@ -116,6 +118,7 @@ export class PublicoService {
         fecha: filtros.fecha,
         servicioIds: filtros.servicioIds,
         aplicarReglasCliente: true,
+        ...(excluirReservaId ? { excluirReservaId } : {}),
       }),
     ]);
 

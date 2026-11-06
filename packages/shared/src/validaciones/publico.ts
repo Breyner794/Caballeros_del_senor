@@ -125,6 +125,13 @@ export interface ServicioPublico {
  * de hoy en una cita pasada.
  */
 export interface ServicioReservado {
+  /**
+   * El id del servicio del catálogo. No es un dato nuevo que ocultar: ya viaja en
+   * `/publico/opciones` y el cliente lo mandó al reservar. Hace falta para
+   * reprogramar: la agenda se calcula por ids, y emparejar por nombre se rompe
+   * en cuanto se renombra un servicio.
+   */
+  servicioId: string;
   nombre: string;
   precio: number;
   duracionMinutos: number;

@@ -58,7 +58,7 @@ export const SELECT_RESERVA_PUBLICA = {
   sede: { select: SELECT_SEDE },
   barbero: { select: SELECT_BARBERO_PUBLICO },
   servicios: {
-    select: { nombreSnapshot: true, precioSnapshot: true, duracionSnapshot: true },
+    select: { servicioId: true, nombreSnapshot: true, precioSnapshot: true, duracionSnapshot: true },
     orderBy: { orden: 'asc' },
   },
 } as const;
