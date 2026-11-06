@@ -82,7 +82,8 @@ function puedeAvanzar(estado: EstadoReserva): boolean {
  *  · Los huecos pertenecen a una sede, así que cambiar de sede limpia fecha, barbero y hora
  *    (un barbero de una sede no atiende en otra).
  *  · Los huecos dependen del barbero, así que cambiar de barbero limpia la hora.
- *  · La duración decide si un hueco cabe, así que cambiar de servicio limpia la hora.
+ *  · La duración decide si un día tiene algún hueco y si un hueco cabe, así que cambiar de
+ *    servicio limpia fecha y hora.
  *  · Los huecos son de un día, así que cambiar de fecha limpia la hora.
  */
 export function reductor(estado: EstadoReserva, accion: AccionReserva): EstadoReserva {
@@ -93,7 +94,7 @@ export function reductor(estado: EstadoReserva, accion: AccionReserva): EstadoRe
       const servicios = yaElegido
         ? estado.servicios.filter((s) => s.id !== accion.servicio.id)
         : [...estado.servicios, accion.servicio];
-      return { ...estado, servicios, hueco: null };
+      return { ...estado, servicios, fecha: null, hueco: null };
     }
     case 'elegirSede': {
       if (estado.paso !== 'servicio') return estado;

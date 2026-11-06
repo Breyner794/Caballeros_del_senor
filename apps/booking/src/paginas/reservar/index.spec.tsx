@@ -119,6 +119,8 @@ function llamadasA(ruta: string) {
 }
 
 beforeEach(() => {
+  // Sin esto, un caso que no pinte el widget llamaría al `reset` del caso anterior.
+  alReiniciar = () => undefined;
   datosOpciones = opciones();
   huecosDia = HUECOS;
   alReservar = async () => RESERVA;
@@ -154,6 +156,8 @@ let alReiniciar: () => void = () => undefined;
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 // ------------------------------------------------------------------------ montaje
@@ -320,6 +324,20 @@ describe('paso de fecha', () => {
     expect(continuar()).toBeDisabled();
     await u.click(screen.getByRole('button', { name: /lunes, 9 de noviembre/ }));
     expect(continuar()).toBeEnabled();
+  });
+
+  it('si cambia los servicios al volver, el día elegido se descarta y hay que elegir otro', async () => {
+    const u = usuario();
+    montar();
+    await hastaFecha(u);
+    await u.click(await screen.findByRole('button', { name: /lunes, 9 de noviembre/ }));
+    await u.click(screen.getByRole('button', { name: /^atrás$/i }));
+    await u.click(await screen.findByRole('checkbox', { name: /Barba/ }));
+    await u.click(continuar());
+
+    const dia = await screen.findByRole('button', { name: /lunes, 9 de noviembre/ });
+    expect(dia).toHaveAttribute('aria-pressed', 'false');
+    expect(continuar()).toBeDisabled();
   });
 
   it('pide el calendario con los servicios y la sede elegidos', async () => {
@@ -617,7 +635,10 @@ describe('errores al reservar', () => {
       );
     };
     await u.click(confirmar());
-    expect(await screen.findByRole('alert')).toHaveTextContent(MENSAJES_ERROR.LIMITE_RESERVAS_ACTIVAS);
+    const aviso = await screen.findByRole('alert');
+    // Texto del canal público: habla con el cliente en segunda persona, no como el panel.
+    expect(aviso).toHaveTextContent(/Ya tienes el máximo de reservas activas/);
+    expect(aviso).not.toHaveTextContent(/este cliente/i);
     await waitFor(() => expect(ubicacion).toBe('/?paso=datos'));
   });
 
@@ -632,6 +653,32 @@ describe('errores al reservar', () => {
     await u.click(confirmar());
     expect(await screen.findByRole('alert')).toHaveTextContent(MENSAJES_ERROR.RECURSO_NO_ENCONTRADO);
     expect(screen.getByRole('link', { name: /empezar de nuevo/i })).toHaveAttribute('href', '/');
+  });
+
+  it('un código que el catálogo no conoce no muestra el texto crudo del servidor', async () => {
+    const u = usuario();
+    montar();
+    await hastaDatos(u);
+    await rellenarDatos(u);
+    alReservar = async () => {
+      throw new ErrorApi('CODIGO_NUEVO', 'Mensaje interno del servidor', 500);
+    };
+    await u.click(confirmar());
+    const aviso = await screen.findByRole('alert');
+    expect(aviso).toHaveTextContent(MENSAJES_ERROR.ERROR_INTERNO);
+    expect(aviso).not.toHaveTextContent(/servidor/);
+  });
+
+  it('si la verificación no puede cargar lo dice sin culpar a la conexión y deja reintentar', async () => {
+    const u = usuario();
+    vi.stubEnv('VITE_TURNSTILE_SITE_KEY', '');
+    montar();
+    await hastaDatos(u);
+    const aviso = await screen.findByRole('alert');
+    expect(aviso).toHaveTextContent(/verificación de seguridad/i);
+    expect(aviso).not.toHaveTextContent(/conexión/i);
+    expect(screen.getByRole('button', { name: /reintentar/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /verificando/i })).toBeDisabled();
   });
 
   it('un error desconocido no deja pantalla en blanco ni texto técnico', async () => {

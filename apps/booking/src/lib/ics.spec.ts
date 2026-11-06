@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ReservaPublica } from '@cds/shared';
-import { generarIcs } from './ics';
+import { generarIcs, plegar } from './ics';
 
 const reserva: ReservaPublica = {
   codigo: 'CDS-7F3K2M',
@@ -47,5 +47,41 @@ describe('generarIcs', () => {
   it('lista los servicios en la descripción', () => {
     expect(ics).toContain('Corte');
     expect(ics).toContain('CDS-7F3K2M');
+  });
+});
+
+const octetos = (texto: string) => new TextEncoder().encode(texto).length;
+
+describe('plegado de líneas (RFC 5545)', () => {
+  it('no toca una línea corta', () => {
+    expect(plegar('SUMMARY:Cita')).toBe('SUMMARY:Cita');
+  });
+
+  it('parte las líneas largas en tramos de 75 octetos como máximo y se pueden desplegar', () => {
+    const larga = `DESCRIPTION:${'Corte clásico, barba y arreglo de cejas. '.repeat(6)}`;
+    const plegada = plegar(larga);
+    const lineas = plegada.split('\r\n');
+    expect(lineas.length).toBeGreaterThan(1);
+    for (const linea of lineas) expect(octetos(linea)).toBeLessThanOrEqual(75);
+    for (const continuacion of lineas.slice(1)) expect(continuacion.startsWith(' ')).toBe(true);
+    // Desplegar (quitar CRLF + espacio) devuelve la línea original.
+    expect(plegada.replace(/\r\n /g, '')).toBe(larga);
+  });
+
+  it('cuenta octetos y no parte un carácter de varios octetos', () => {
+    const acentos = `DESCRIPTION:${'ñ'.repeat(80)}`;
+    const lineas = plegar(acentos).split('\r\n');
+    for (const linea of lineas) expect(octetos(linea)).toBeLessThanOrEqual(75);
+    expect(plegar(acentos).replace(/\r\n /g, '')).toBe(acentos);
+  });
+
+  it('el archivo completo con varios servicios no tiene líneas de más de 75 octetos', () => {
+    const varios: ReservaPublica = {
+      ...reserva,
+      servicios: ['Corte clásico', 'Barba con toalla caliente', 'Arreglo de cejas', 'Limpieza facial'].map(
+        (nombre) => ({ nombre, precio: 10000, duracionMinutos: 20 }),
+      ),
+    };
+    for (const linea of generarIcs(varios).split('\r\n')) expect(octetos(linea)).toBeLessThanOrEqual(75);
   });
 });

@@ -19,6 +19,33 @@ function enUtc(iso: string): string {
   return new Date(iso).toISOString().replace(/[-:]/g, '').replace(/\.\d{3}/, '');
 }
 
+/**
+ * RFC 5545 §3.1: ninguna línea pasa de 75 octetos; si se pasa, se parte y la
+ * continuación empieza con un espacio. Se cuenta en octetos UTF-8 (no en
+ * caracteres) y nunca se parte un carácter por la mitad.
+ */
+export function plegar(linea: string): string {
+  const codificador = new TextEncoder();
+  const partes: string[] = [];
+  let actual = '';
+  let octetos = 0;
+  // La primera línea admite 75 octetos; las demás, 74 más el espacio inicial.
+  let limite = 75;
+  for (const caracter of linea) {
+    const largo = codificador.encode(caracter).length;
+    if (octetos + largo > limite) {
+      partes.push(actual);
+      actual = '';
+      octetos = 0;
+      limite = 74;
+    }
+    actual += caracter;
+    octetos += largo;
+  }
+  partes.push(actual);
+  return partes.join('\r\n ');
+}
+
 export function generarIcs(reserva: ReservaPublica): string {
   const lugar = [reserva.sede.nombre, reserva.sede.direccion].filter(Boolean).join(', ');
   const descripcion = [
@@ -44,7 +71,7 @@ export function generarIcs(reserva: ReservaPublica): string {
     'END:VEVENT',
     'END:VCALENDAR',
   ];
-  return `${lineas.join('\r\n')}\r\n`;
+  return `${lineas.map(plegar).join('\r\n')}\r\n`;
 }
 
 /** Entrega el `.ics` al navegador como una descarga. */
@@ -57,5 +84,6 @@ export function descargarIcs(reserva: ReservaPublica): void {
   document.body.appendChild(enlace);
   enlace.click();
   enlace.remove();
-  URL.revokeObjectURL(url);
+  // Revocar en el mismo turno hace que Firefox y algunos WebView aborten la descarga a medias.
+  setTimeout(() => URL.revokeObjectURL(url), 0);
 }

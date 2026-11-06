@@ -39,6 +39,14 @@ type CampoFormulario = keyof BorradorDatos;
 const TEXTO_CAPTCHA = 'No pudimos verificar que eres una persona. Inténtalo de nuevo.';
 
 /**
+ * El widget de verificación no cargó (falta la clave o el script no llegó):
+ * es un fallo nuestro o de un bloqueador, no de la conexión del cliente, así
+ * que no se le dice «revisa tu conexión». Tampoco sale de `MENSAJES_ERROR`.
+ */
+const TEXTO_VERIFICACION_NO_CARGA =
+  'No pudimos cargar la verificación de seguridad. Recarga la página o inténtalo en unos minutos.';
+
+/**
  * Errores que significan «esa hora ya no sirve»: no se arreglan en este
  * formulario, sino eligiendo otra hora, así que los atiende la ruta.
  */
@@ -264,7 +272,7 @@ export function PasoDatos({
           claveSitio={import.meta.env.VITE_TURNSTILE_SITE_KEY}
           reinicios={reinicios}
           alCambiarToken={setToken}
-          alFallar={() => setAviso({ texto: MENSAJES_ERROR.ERROR_RED, captcha: true })}
+          alFallar={() => setAviso({ texto: TEXTO_VERIFICACION_NO_CARGA, captcha: true })}
         />
       </form>
 

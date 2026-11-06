@@ -98,9 +98,9 @@ export function PasoFecha({
         >
           ‹
         </button>
-        <h3 className="font-semibold first-letter:uppercase" aria-live="polite">
+        <h2 className="font-semibold first-letter:uppercase" aria-live="polite">
           {etiquetaMes(mes)}
-        </h3>
+        </h2>
         <button
           type="button"
           aria-label="Mes siguiente"

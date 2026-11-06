@@ -118,11 +118,13 @@ describe('reductor del asistente de reserva', () => {
     expect(estado.hueco).toEqual(hueco);
   });
 
-  it('cambiar de servicio limpia la hora elegida pero conserva la fecha', () => {
+  it('cambiar de servicio limpia la fecha y la hora: la duración decide si el día tiene hueco', () => {
     const estado = aplicar(...hastaDatos, ...retroceder(3), { tipo: 'alternarServicio', servicio: barba });
     expect(estado.hueco).toBeNull();
-    expect(estado.fecha).toBe('2026-11-10');
+    expect(estado.fecha).toBeNull();
     expect(estado.sedeId).toBe('sede-1');
+    // Sin fecha no se puede continuar: el cliente tiene que volver a elegir día.
+    expect(reductor({ ...estado, paso: 'fecha' }, { tipo: 'avanzar' }).paso).toBe('fecha');
   });
 
   it('cambiar de fecha limpia la hora elegida', () => {
@@ -223,6 +225,8 @@ describe('reductor del asistente de reserva', () => {
     );
     const enFecha = deepFreeze(aplicar(...hastaFecha));
     const enHora = deepFreeze(aplicar(...hastaHora));
+    // Con una hora elegida: si no, `soltarHora` saldría por su guard sin visitar la rama que construye el estado nuevo.
+    const enHoraConHueco = deepFreeze(aplicar(...hastaHora, { tipo: 'elegirHora', hueco }));
     const enDatos = deepFreeze(aplicar(...hastaDatos));
 
     // Cada acción se aplica desde un paso donde de verdad actúa (no sale por el guard).
@@ -236,6 +240,9 @@ describe('reductor del asistente de reserva', () => {
     expect(reductor(enDatos, { tipo: 'retroceder' }).paso).toBe('hora');
     expect(reductor(enDatos, { tipo: 'confirmar' }).paso).toBe('listo');
     expect(reductor(enHora, { tipo: 'elegirBarbero', barberoId: 'b-1' }).barberoId).toBe('b-1');
-    expect(reductor(enHora, { tipo: 'soltarHora' }).hueco).toBeNull();
+    const sinHora = reductor(enHoraConHueco, { tipo: 'soltarHora' });
+    expect(sinHora).not.toBe(enHoraConHueco);
+    expect(sinHora.hueco).toBeNull();
+    expect(reductor(enDatos, { tipo: 'soltarHora' }).hueco).toBeNull();
   });
 });
