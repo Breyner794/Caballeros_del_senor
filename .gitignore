@@ -15,3 +15,6 @@ pgdata/
 # Espacio de trabajo de los planes de superpowers: artefactos de proceso,
 # no codigo del proyecto.
 .superpowers/
+
+# Caché de compilación incremental de TypeScript
+*.tsbuildinfo
