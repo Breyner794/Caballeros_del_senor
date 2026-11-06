@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   CODIGOS_ERROR,
@@ -23,6 +23,7 @@ vi.mock('@/lib/api', async (importOriginal) => {
 
 const TOKEN_VIEJO = 'token-viejo-0123456789';
 const TOKEN_NUEVO = 'token-nuevo-9876543210';
+const TOKEN_OTRO = 'token-otro-5555555555';
 
 const barberoAndres = { id: '33333333-3333-4333-8333-333333333331', nombre: 'Andrés', bio: null, fotoUrl: null };
 const SEDE_ID = '11111111-1111-4111-8111-111111111111';
@@ -78,7 +79,7 @@ function cita(cambios: Partial<MiReservaPublica> = {}): MiReservaPublica {
     finEn: '2026-11-12T15:30:00.000Z',
     sede: OPCIONES.sedes[0],
     barbero: barberoAndres,
-    servicios: [{ nombre: 'Corte clásico', precio: 25000, duracionMinutos: 30 }],
+    servicios: [{ servicioId: SERVICIO_ID, nombre: 'Corte clásico', precio: 25000, duracionMinutos: 30 }],
     total: 25000,
     puedeCancelar: true,
     puedeReprogramar: true,
@@ -101,7 +102,7 @@ let datosOpciones: OpcionesPublicas;
 type Opciones = { method?: string; body?: unknown } | undefined;
 
 const llamadasA = (metodo: 'GET' | 'POST', ruta: string) =>
-  peticionDoblada.mock.calls.filter(([r, o]) => r.startsWith(ruta) && ((o as Opciones)?.method ?? 'GET') === metodo);
+  peticionDoblada.mock.calls.filter(([r, o]) => (r === ruta || r.startsWith(`${ruta}?`)) && ((o as Opciones)?.method ?? 'GET') === metodo);
 
 /** El token que el cliente HTTP mandaría ahora: el último que se le dio. */
 const tokenEnviado = () => tokenGuardado.mock.calls.at(-1)?.[0] ?? null;
@@ -122,10 +123,13 @@ beforeEach(() => {
   peticionDoblada.mockImplementation((async (ruta: string, opciones?: Opciones) => {
     if (ruta.startsWith('/publico/opciones')) return datosOpciones;
     if (ruta.startsWith('/publico/calendario')) return CALENDARIO;
-    if (ruta.startsWith('/publico/disponibilidad')) {
+    // La rejilla de quien reprograma va por la ruta que excluye la propia cita.
+    if (ruta.startsWith('/publico/mi-reserva/disponibilidad')) {
+      exigirTokenVigente();
       return { fecha: '2026-11-09', laborable: true, huecos: HUECOS };
     }
     if (ruta === '/publico/mi-reserva' && !opciones?.method) {
+      if (tokenEnviado() === TOKEN_OTRO) return cita({ codigo: 'CDS-OTRA00' });
       exigirTokenVigente();
       return citaActual;
     }
@@ -172,7 +176,9 @@ afterEach(() => {
 let ubicacion = { pathname: '', search: '', hash: '' };
 function SondaUbicacion() {
   ubicacion = useLocation();
-  return null;
+  const navegar = useNavigate();
+  // Pegar otro enlace de gestión en la misma pestaña solo cambia el fragmento.
+  return <button onClick={() => navegar({ hash: TOKEN_OTRO })}>(pegar otro enlace)</button>;
 }
 
 function montar(ruta = `/cita#${TOKEN_VIEJO}`) {
@@ -240,6 +246,39 @@ describe('el token del enlace', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent(MENSAJES_ERROR.ERROR_RED);
     await u.click(screen.getByRole('button', { name: /reintentar/i }));
     await hastaDetalle();
+  });
+});
+
+// ================================================================ otro enlace en la pestaña
+
+describe('pegar otro enlace de gestión en la misma pestaña', () => {
+  it('muestra la cita del enlace nuevo, no se queda con la anterior', async () => {
+    const u = usuario();
+    montar();
+    await hastaDetalle();
+    await u.click(screen.getByRole('button', { name: /pegar otro enlace/ }));
+    expect(await screen.findByText('CDS-OTRA00')).toBeInTheDocument();
+    expect(screen.queryByText('CDS-7F3K2M')).not.toBeInTheDocument();
+    expect(tokenGuardado).toHaveBeenLastCalledWith(TOKEN_OTRO);
+  });
+
+  it('y quita el aviso de la cita anterior: no mezcla lo de una con la otra', async () => {
+    const u = usuario();
+    montar();
+    await reprogramarALas930(u);
+    await screen.findByText(/quedó reprogramada/);
+    // El token vigente cambió a TOKEN_NUEVO; el usuario pega TOKEN_OTRO.
+    await u.click(screen.getByRole('button', { name: /pegar otro enlace/ }));
+    expect(await screen.findByText('CDS-OTRA00')).toBeInTheDocument();
+    expect(screen.queryByText(/quedó reprogramada/)).not.toBeInTheDocument();
+  });
+
+  it('reprogramar no se confunde con pegar otro enlace: la pantalla no se reinicia', async () => {
+    const u = usuario();
+    montar();
+    await reprogramarALas930(u);
+    // El hash cambió por nuestra propia acción: el aviso sigue ahí.
+    expect(await screen.findByText(/quedó reprogramada/)).toBeInTheDocument();
   });
 });
 
@@ -500,14 +539,28 @@ describe('reprogramar', () => {
     expect(screen.queryByRole('button', { name: /confirmar el cambio/i })).not.toBeInTheDocument();
   });
 
-  it('si un servicio de la cita ya no está en el catálogo no ofrece reprogramar desde la web', async () => {
+  it('un servicio renombrado en el catálogo no impide reprogramar: se pide la agenda por id', async () => {
+    const u = usuario();
     citaActual = cita({
-      servicios: [{ nombre: 'Servicio retirado', precio: 1000, duracionMinutos: 20 }],
+      servicios: [{ servicioId: SERVICIO_ID, nombre: 'Corte (nombre antiguo)', precio: 25000, duracionMinutos: 30 }],
     });
     montar();
     await hastaDetalle();
-    expect(botonReprogramar()).toBeDisabled();
-    expect(screen.getByText(/no se puede cambiar desde la web\. Llama a la barbería/i)).toBeInTheDocument();
+    expect(botonReprogramar()).toBeEnabled();
+    await u.click(botonReprogramar());
+    await u.click(await screen.findByRole('button', { name: /lunes, 9 de noviembre/ }));
+    await screen.findByRole('button', { name: '9:30 a. m.' });
+    const [[ruta]] = peticionDoblada.mock.calls.filter(([r]) => r.startsWith('/publico/mi-reserva/disponibilidad'));
+    expect(ruta).toContain(`servicioIds=${SERVICIO_ID}`);
+  });
+
+  it('la rejilla sale de la ruta que excluye la propia cita, no de la pública', async () => {
+    const u = usuario();
+    montar();
+    await hastaHoras(u);
+    await screen.findByRole('button', { name: '9:30 a. m.' });
+    expect(llamadasA('GET', '/publico/disponibilidad')).toHaveLength(0);
+    expect(llamadasA('GET', '/publico/mi-reserva/disponibilidad')).toHaveLength(1);
   });
 
   it('«Volver» deja la cita como estaba sin escribir nada', async () => {

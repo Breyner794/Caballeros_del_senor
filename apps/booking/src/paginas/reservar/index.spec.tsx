@@ -102,7 +102,7 @@ const RESERVA: ReservaPublica & { tokenGestion: string } = {
     mapsUrl: null,
   },
   barbero: barberoAndres,
-  servicios: [{ nombre: 'Corte clásico', precio: 25000, duracionMinutos: 30 }],
+  servicios: [{ servicioId: '22222222-2222-4222-8222-222222222221', nombre: 'Corte clásico', precio: 25000, duracionMinutos: 30 }],
   total: 25000,
   tokenGestion: 'tok-abc',
 };

@@ -11,18 +11,14 @@ import {
 } from '@cds/shared';
 import { BarraInferior } from '@/componentes/barra-inferior';
 import { ErrorConsulta } from '@/componentes/error-consulta';
-import { Turnstile } from '@/componentes/turnstile';
+import { AvisoVerificacionNoCarga, TEXTO_CAPTCHA, useCaptcha, type Captcha } from '@/componentes/captcha';
 import { Aviso } from '@/componentes/ui/aviso';
 import { Boton, claseBoton } from '@/componentes/ui/boton';
 import { ErrorApi, guardarTokenGestion, peticion } from '@/lib/api';
 import { esErrorDeRed, mensajeDeError } from '@/lib/errores';
 import { etiquetaFechaHora, fechaDeHoy, formatearPrecio } from '@/lib/formato';
 import { claveOpciones, pedirOpciones } from './reservar/consultas';
-import {
-  ERRORES_DE_HORARIO,
-  TEXTO_CAPTCHA,
-  TEXTO_VERIFICACION_NO_CARGA,
-} from './reservar/paso-datos';
+import { ERRORES_DE_HORARIO } from './reservar/paso-datos';
 import { enlaceDeGestion } from './reservar/paso-listo';
 import { PasoFecha } from './reservar/paso-fecha';
 import { PasoHora } from './reservar/paso-hora';
@@ -50,10 +46,6 @@ import { PasoHora } from './reservar/paso-hora';
  */
 const TEXTO_LA_CITA_CAMBIO =
   'Tu cita cambió mientras la modificabas. Esto es lo que figura ahora; revísalo antes de volver a intentarlo.';
-
-/** El servicio de la cita ya no existe en el catálogo (se renombró o se retiró): no se puede calcular la agenda desde la web. */
-const TEXTO_NO_SE_PUEDE_DESDE_LA_WEB =
-  'Esta cita no se puede cambiar desde la web. Llama a la barbería.';
 
 const TEXTO_REPROGRAMADA = 'Listo, tu cita quedó reprogramada.';
 const TEXTO_ENLACE_CAMBIO =
@@ -88,35 +80,35 @@ function motivoReprogramar(cita: MiReservaPublica): string {
     : MENSAJES_ERROR.ESTADO_RESERVA_INVALIDO;
 }
 
-/**
- * La cita guarda sus servicios congelados, sin id; la agenda necesita ids para
- * calcular la duración. Se emparejan por nombre con el catálogo. Si alguno ya
- * no está, devuelve `null` y la reprogramación se cierra en la web.
- */
-function idsDeServicios(cita: MiReservaPublica, catalogo: OpcionesPublicas['servicios']): string[] | null {
-  const usados = new Set<string>();
-  const ids: string[] = [];
-  for (const reservado of cita.servicios) {
-    const encontrado = catalogo.find((s) => s.nombre === reservado.nombre && !usados.has(s.id));
-    if (!encontrado) return null;
-    usados.add(encontrado.id);
-    ids.push(encontrado.id);
-  }
-  return ids;
-}
-
 // ================================================================== la ruta
 
 export function Cita() {
   const { hash } = useLocation();
-  // Se lee una vez al abrir. Después manda el estado: reprogramar cambia el token y la URL a la vez.
-  const [token, setToken] = useState<string | null>(() => hash.slice(1) || null);
+  const tokenDeLaUrl = hash.slice(1) || null;
+  const [token, setToken] = useState<string | null>(tokenDeLaUrl);
+  // Cada vez que el cliente abre OTRO enlace, la pantalla empieza de cero.
+  const [apertura, setApertura] = useState(0);
+  const tokenVigente = useRef(token);
   const navegar = useNavigate();
+  const clienteConsultas = useQueryClient();
+
+  // Pegar otro enlace de gestión en la misma pestaña solo cambia el fragmento:
+  // no recarga la página. Con dos citas activas por cliente es el caso normal.
+  useEffect(() => {
+    // Un cambio hecho por esta pantalla (reprogramar) ya dejó `tokenVigente` al día.
+    if (tokenDeLaUrl === tokenVigente.current) return;
+    tokenVigente.current = tokenDeLaUrl;
+    // La cita anterior no es la de este enlace: ni su caché ni sus avisos sobreviven.
+    clienteConsultas.removeQueries({ queryKey: claveCita });
+    setToken(tokenDeLaUrl);
+    setApertura((n) => n + 1);
+  }, [tokenDeLaUrl, clienteConsultas]);
 
   function alCambiarToken(nuevo: string) {
     // Primero el cliente HTTP, luego la URL, y solo después el estado: si algo
     // falla a mitad, el cliente no se queda con un enlace que no abre su cita.
     guardarTokenGestion(nuevo);
+    tokenVigente.current = nuevo;
     navegar({ hash: nuevo }, { replace: true });
     setToken(nuevo);
   }
@@ -133,7 +125,7 @@ export function Cita() {
         {token === null ? (
           <EnlaceNoValido texto={MENSAJES_ERROR.TOKEN_INVALIDO} />
         ) : (
-          <GestionCita token={token} alCambiarToken={alCambiarToken} />
+          <GestionCita key={apertura} token={token} alCambiarToken={alCambiarToken} />
         )}
       </main>
     </div>
@@ -241,13 +233,11 @@ function GestionCita({ token, alCambiarToken }: PropsGestion) {
     );
   }
 
-  const idsServicios = idsDeServicios(datos, catalogo.servicios);
-
-  if (vista === 'reprogramando' && idsServicios) {
+  if (vista === 'reprogramando') {
     return (
       <Reprogramar
         cita={datos}
-        servicioIds={idsServicios}
+        servicioIds={datos.servicios.map((s) => s.servicioId)}
         opciones={catalogo}
         alVolver={() => volverAlDetalle(null)}
         alReprogramarse={(nueva) => {
@@ -275,7 +265,6 @@ function GestionCita({ token, alCambiarToken }: PropsGestion) {
       moneda={moneda}
       aviso={aviso}
       reprogramada={reprogramada}
-      puedeReprogramarDesdeLaWeb={idsServicios !== null}
       enlaceNuevo={() => enlaceDeGestion(token)}
       alCancelar={() => {
         setAviso(null);
@@ -299,7 +288,6 @@ interface PropsDetalle {
   moneda: string;
   aviso: string | null;
   reprogramada: boolean;
-  puedeReprogramarDesdeLaWeb: boolean;
   /** El enlace vigente, calculado al copiarlo: el token no se guarda ni se pinta en la ficha. */
   enlaceNuevo: () => string;
   alCancelar: () => void;
@@ -312,7 +300,6 @@ function Detalle({
   moneda,
   aviso,
   reprogramada,
-  puedeReprogramarDesdeLaWeb,
   enlaceNuevo,
   alCancelar,
   alReprogramar,
@@ -327,13 +314,6 @@ function Detalle({
       setCopia('fallo');
     }
   }
-
-  const reprogramarActivo = cita.puedeReprogramar && puedeReprogramarDesdeLaWeb;
-  const motivoNoReprogramar = !cita.puedeReprogramar
-    ? motivoReprogramar(cita)
-    : !puedeReprogramarDesdeLaWeb
-      ? TEXTO_NO_SE_PUEDE_DESDE_LA_WEB
-      : null;
 
   return (
     <div className="space-y-6">
@@ -379,10 +359,12 @@ function Detalle({
 
       <div className="space-y-5">
         <div className="space-y-2">
-          <Boton className="w-full" disabled={!reprogramarActivo} onClick={alReprogramar}>
+          <Boton className="w-full" disabled={!cita.puedeReprogramar} onClick={alReprogramar}>
             Cambiar fecha u hora
           </Boton>
-          {motivoNoReprogramar ? <p className="text-muted-foreground text-sm">{motivoNoReprogramar}</p> : null}
+          {!cita.puedeReprogramar ? (
+            <p className="text-muted-foreground text-sm">{motivoReprogramar(cita)}</p>
+          ) : null}
         </div>
         <div className="space-y-2">
           <Boton variante="contorno" className="w-full" disabled={!cita.puedeCancelar} onClick={alCancelar}>
@@ -410,6 +392,7 @@ interface PropsCancelacion {
 
 function ConfirmarCancelacion({ cita, zonaHoraria, alConservar, alCancelarse, alNoAdmitirse }: PropsCancelacion) {
   const captcha = useCaptcha();
+  const [textoAviso, setTextoAviso] = useState<string | null>(null);
 
   const cancelar = useMutation({
     mutationFn: (tokenTurnstile: string) =>
@@ -421,7 +404,7 @@ function ConfirmarCancelacion({ cita, zonaHoraria, alConservar, alCancelarse, al
         alNoAdmitirse(mensajeDeError(error));
         return;
       }
-      captcha.setAviso(textoDeError(error));
+      setTextoAviso(textoDeError(error));
     },
   });
 
@@ -436,13 +419,17 @@ function ConfirmarCancelacion({ cita, zonaHoraria, alConservar, alCancelarse, al
       </div>
 
       {captcha.widget}
-      {captcha.aviso}
+      <AvisosDeAccion captcha={captcha} texto={textoAviso} />
 
       <div className="space-y-3">
         <Boton
           className="w-full"
           disabled={captcha.token === null || cancelar.isPending}
-          onClick={() => captcha.token && cancelar.mutate(captcha.token)}
+          onClick={() => {
+            if (!captcha.token) return;
+            setTextoAviso(null);
+            cancelar.mutate(captcha.token);
+          }}
         >
           {cancelar.isPending ? 'Cancelando…' : 'Sí, cancelar mi cita'}
         </Boton>
@@ -480,6 +467,7 @@ function Reprogramar({ cita, servicioIds, opciones, alVolver, alReprogramarse, a
     barberos?.some((b) => b.id === cita.barbero.id) ? cita.barbero.id : null,
   );
   const captcha = useCaptcha();
+  const [textoAviso, setTextoAviso] = useState<string | null>(null);
 
   const reprogramar = useMutation({
     mutationFn: (cuerpo: { inicioEn: string; barberoId?: string; tokenTurnstile: string }) =>
@@ -503,13 +491,13 @@ function Reprogramar({ cita, servicioIds, opciones, alVolver, alReprogramarse, a
           void clienteConsultas.invalidateQueries({ queryKey: ['publico', 'calendario'] });
         }
       }
-      captcha.setAviso(textoDeError(error));
+      setTextoAviso(textoDeError(error));
     },
   });
 
   function confirmar() {
     if (!hueco || !captcha.token) return;
-    captcha.setAviso(null);
+    setTextoAviso(null);
     reprogramar.mutate({
       inicioEn: hueco.inicioEn,
       // El barbero solo viaja si el negocio deja elegirlo.
@@ -545,7 +533,7 @@ function Reprogramar({ cita, servicioIds, opciones, alVolver, alReprogramarse, a
           maxDiasAnticipacion={config.maxDiasAnticipacion}
           fechaElegida={null}
           alElegirFecha={(f) => {
-            captcha.setAviso(null);
+            setTextoAviso(null);
             setFecha(f);
           }}
         />
@@ -556,9 +544,10 @@ function Reprogramar({ cita, servicioIds, opciones, alVolver, alReprogramarse, a
           servicioIds={servicioIds}
           barberoId={barberoId}
           barberos={barberos}
+          deMiCita
           huecoElegido={hueco?.inicioEn ?? null}
           alElegirHueco={(h) => {
-            captcha.setAviso(null);
+            setTextoAviso(null);
             setHueco(h);
           }}
           alElegirBarbero={(id) => {
@@ -570,7 +559,7 @@ function Reprogramar({ cita, servicioIds, opciones, alVolver, alReprogramarse, a
 
       {/* Un solo widget durante toda la pantalla: así el token no caduca al ir y volver entre día y hora. */}
       {captcha.widget}
-      {captcha.aviso}
+      <AvisosDeAccion captcha={captcha} texto={textoAviso} />
 
       {hueco ? (
         <BarraInferior>
@@ -597,55 +586,24 @@ function textoDeError(error: unknown): string {
   return mensajeDeError(error);
 }
 
-/**
- * El widget de Turnstile y su ciclo, igual que en el paso de datos: un token
- * solo sirve para una petición, así que tras cada intento se pide otro.
- */
-function useCaptcha() {
-  const [token, setToken] = useState<string | null>(null);
-  const [reinicios, setReinicios] = useState(0);
-  const [intentoWidget, setIntentoWidget] = useState(0);
-  const [textoAviso, setTextoAviso] = useState<string | null>(null);
-  const [widgetFallo, setWidgetFallo] = useState(false);
-
-  const zonaAviso = useRef<HTMLDivElement>(null);
+/** Lo que falló al cargar la verificación o al enviar, a la vista (se lleva a pantalla: el cliente no lo busca). */
+function AvisosDeAccion({ captcha, texto }: { captcha: Captcha; texto: string | null }) {
+  const zona = useRef<HTMLDivElement>(null);
+  const visible = captcha.fallo || texto !== null;
   useEffect(() => {
-    if (textoAviso) zonaAviso.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-  }, [textoAviso]);
+    if (visible) zona.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [visible]);
 
-  return {
-    token,
-    setAviso: setTextoAviso,
-    pedirOtro: () => {
-      setToken(null);
-      setReinicios((n) => n + 1);
-    },
-    widget: (
-      <Turnstile
-        key={intentoWidget}
-        claveSitio={import.meta.env.VITE_TURNSTILE_SITE_KEY}
-        reinicios={reinicios}
-        alCambiarToken={setToken}
-        alFallar={() => setWidgetFallo(true)}
-      />
-    ),
-    aviso:
-      textoAviso || widgetFallo ? (
-        <div ref={zonaAviso} className="space-y-3">
-          <Aviso>{widgetFallo ? TEXTO_VERIFICACION_NO_CARGA : textoAviso}</Aviso>
-          {widgetFallo ? (
-            <Boton
-              variante="contorno"
-              className="w-full"
-              onClick={() => {
-                setWidgetFallo(false);
-                setIntentoWidget((n) => n + 1);
-              }}
-            >
-              Reintentar
-            </Boton>
-          ) : null}
-        </div>
-      ) : null,
-  };
+  if (captcha.fallo) {
+    return (
+      <div ref={zona}>
+        <AvisoVerificacionNoCarga alReintentar={captcha.reintentarWidget} />
+      </div>
+    );
+  }
+  return texto ? (
+    <div ref={zona}>
+      <Aviso>{texto}</Aviso>
+    </div>
+  ) : null;
 }

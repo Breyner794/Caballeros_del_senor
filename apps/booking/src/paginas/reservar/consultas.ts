@@ -61,14 +61,27 @@ export interface ParametrosDisponibilidad {
   servicioIds: string[];
   /** `null` o ausente: la unión de los huecos de toda la sede. */
   barberoId?: string | null;
+  /**
+   * Quien reprograma: la rejilla sale de `mi-reserva/disponibilidad`, que no cuenta
+   * su propia cita como ocupada. Va por el token, no por un id que mande el cliente.
+   */
+  deMiCita?: boolean;
 }
 
 export const claveDisponibilidad = (p: ParametrosDisponibilidad) =>
-  ['publico', 'disponibilidad', p.sedeId, p.fecha, ordenados(p.servicioIds), p.barberoId ?? null] as const;
+  [
+    'publico',
+    'disponibilidad',
+    p.deMiCita ? 'mi-cita' : 'general',
+    p.sedeId,
+    p.fecha,
+    ordenados(p.servicioIds),
+    p.barberoId ?? null,
+  ] as const;
 
 export function pedirDisponibilidad(p: ParametrosDisponibilidad): Promise<RespuestaDisponibilidad> {
   return peticion<RespuestaDisponibilidad>(
-    `/publico/disponibilidad?${consulta({
+    `${p.deMiCita ? '/publico/mi-reserva/disponibilidad' : '/publico/disponibilidad'}?${consulta({
       sedeId: p.sedeId,
       fecha: p.fecha,
       servicioIds: ordenados(p.servicioIds),

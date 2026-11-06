@@ -26,6 +26,8 @@ export interface PropsPasoHora {
   huecoElegido: string | null;
   alElegirHueco: (hueco: HuecoPublico) => void;
   alElegirBarbero: (barberoId: string | null) => void;
+  /** Quien reprograma ve su propia hora libre (ver `ParametrosDisponibilidad`). */
+  deMiCita?: boolean;
 }
 
 export function PasoHora({
@@ -37,8 +39,9 @@ export function PasoHora({
   huecoElegido,
   alElegirHueco,
   alElegirBarbero,
+  deMiCita,
 }: PropsPasoHora) {
-  const parametros = { sedeId, fecha, servicioIds, barberoId };
+  const parametros = { sedeId, fecha, servicioIds, barberoId, deMiCita };
   const disponibilidad = useQuery({
     queryKey: claveDisponibilidad(parametros),
     queryFn: () => pedirDisponibilidad(parametros),

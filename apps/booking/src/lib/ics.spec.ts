@@ -16,7 +16,7 @@ const reserva: ReservaPublica = {
     mapsUrl: null,
   },
   barbero: { id: 'b1', nombre: 'Andrés', bio: null, fotoUrl: null },
-  servicios: [{ nombre: 'Corte', precio: 25000, duracionMinutos: 30 }],
+  servicios: [{ servicioId: 's1', nombre: 'Corte', precio: 25000, duracionMinutos: 30 }],
   total: 25000,
 };
 
@@ -79,7 +79,7 @@ describe('plegado de líneas (RFC 5545)', () => {
     const varios: ReservaPublica = {
       ...reserva,
       servicios: ['Corte clásico', 'Barba con toalla caliente', 'Arreglo de cejas', 'Limpieza facial'].map(
-        (nombre) => ({ nombre, precio: 10000, duracionMinutos: 20 }),
+        (nombre, i) => ({ servicioId: `s${i}`, nombre, precio: 10000, duracionMinutos: 20 }),
       ),
     };
     for (const linea of generarIcs(varios).split('\r\n')) expect(octetos(linea)).toBeLessThanOrEqual(75);
