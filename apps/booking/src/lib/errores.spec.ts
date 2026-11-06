@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { CODIGOS_ERROR, MENSAJES_ERROR } from '@cds/shared';
 import { ErrorApi } from './api';
-import { mensajeDeError } from './errores';
+import { ERRORES_DE_HORARIO, mensajeDeError } from './errores';
 
 const error = (codigo: string, mensaje = 'texto del servidor') => new ErrorApi(codigo, mensaje, 400);
 
@@ -22,5 +22,22 @@ describe('mensajeDeError', () => {
 
   it('lo que no es un ErrorApi cae al genérico', () => {
     expect(mensajeDeError(new Error('boom'))).toBe(MENSAJES_ERROR.ERROR_INTERNO);
+  });
+});
+
+describe('ERRORES_DE_HORARIO', () => {
+  it('son los errores que se arreglan eligiendo otra hora, y solo esos', () => {
+    expect([...ERRORES_DE_HORARIO].sort()).toEqual(
+      [
+        CODIGOS_ERROR.RESERVA_SOLAPADA,
+        CODIGOS_ERROR.ANTELACION_INSUFICIENTE,
+        CODIGOS_ERROR.HORARIO_FUERA_DE_JORNADA,
+        CODIGOS_ERROR.BARBERO_NO_TRABAJA_ESE_DIA,
+        CODIGOS_ERROR.SEDE_CERRADA,
+        CODIGOS_ERROR.DIA_NO_LABORABLE,
+        CODIGOS_ERROR.RESERVA_EN_EL_PASADO,
+        CODIGOS_ERROR.FECHA_DEMASIADO_LEJANA,
+      ].sort(),
+    );
   });
 });

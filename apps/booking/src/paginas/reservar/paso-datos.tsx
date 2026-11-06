@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useState, type FormEvent } from 'react';
 import { useMutation } from '@tanstack/react-query';
 import {
   CODIGOS_ERROR,
@@ -7,12 +7,11 @@ import {
   type ReservaPublica,
 } from '@cds/shared';
 import { BarraInferior } from '@/componentes/barra-inferior';
-import { AvisoVerificacionNoCarga, TEXTO_CAPTCHA, useCaptcha } from '@/componentes/captcha';
-import { Aviso } from '@/componentes/ui/aviso';
+import { AvisosDeAccion, TEXTO_CAPTCHA, esCaptchaRechazado, useCaptcha } from '@/componentes/captcha';
 import { Boton, claseBoton } from '@/componentes/ui/boton';
 import { AreaTexto, Campo, Entrada } from '@/componentes/ui/campo';
 import { peticion, ErrorApi } from '@/lib/api';
-import { mensajeDeError } from '@/lib/errores';
+import { ERRORES_DE_HORARIO, mensajeDeError } from '@/lib/errores';
 import { etiquetaFecha, etiquetaHora, formatearDuracion, formatearPrecio } from '@/lib/formato';
 import { totalDuracion, totalPrecio, type EstadoReserva } from './reductor';
 
@@ -29,21 +28,6 @@ export const borradorVacio: BorradorDatos = { nombre: '', telefono: '', email: '
 export type ReservaCreada = ReservaPublica & { tokenGestion: string };
 
 type CampoFormulario = keyof BorradorDatos;
-
-/**
- * Errores que significan «esa hora ya no sirve»: no se arreglan en este
- * formulario, sino eligiendo otra hora, así que los atiende la ruta.
- */
-export const ERRORES_DE_HORARIO: ReadonlySet<string> = new Set([
-  CODIGOS_ERROR.RESERVA_SOLAPADA,
-  CODIGOS_ERROR.ANTELACION_INSUFICIENTE,
-  CODIGOS_ERROR.HORARIO_FUERA_DE_JORNADA,
-  CODIGOS_ERROR.BARBERO_NO_TRABAJA_ESE_DIA,
-  CODIGOS_ERROR.SEDE_CERRADA,
-  CODIGOS_ERROR.DIA_NO_LABORABLE,
-  CODIGOS_ERROR.RESERVA_EN_EL_PASADO,
-  CODIGOS_ERROR.FECHA_DEMASIADO_LEJANA,
-]);
 
 /** Errores que significan «algo de lo elegido ya no existe»: lo sano es empezar de nuevo. */
 const ERRORES_DE_CATALOGO: ReadonlySet<string> = new Set([
@@ -101,12 +85,6 @@ export function PasoDatos({
   const [erroresCampo, setErroresCampo] = useState<ErroresCampo>({});
   const [aviso, setAviso] = useState<AvisoLocal | null>(null);
 
-  // El error aparece bajo el formulario: se lleva a la vista para que el cliente lo vea sin buscarlo.
-  const zonaAviso = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (aviso || captcha.fallo) zonaAviso.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-  }, [aviso, captcha.fallo]);
-
   const crear = useMutation({
     mutationFn: (cuerpo: unknown) =>
       peticion<ReservaCreada>('/publico/reservas', { method: 'POST', body: cuerpo }),
@@ -124,7 +102,7 @@ export function PasoDatos({
         return;
       }
       if (error.codigo === CODIGOS_ERROR.VALIDACION) {
-        if (error.campos?.tokenTurnstile) {
+        if (esCaptchaRechazado(error)) {
           setAviso({ texto: TEXTO_CAPTCHA });
           return;
         }
@@ -249,20 +227,13 @@ export function PasoDatos({
         {captcha.widget}
       </form>
 
-      {captcha.fallo ? (
-        <div ref={zonaAviso}>
-          <AvisoVerificacionNoCarga alReintentar={captcha.reintentarWidget} />
-        </div>
-      ) : aviso ? (
-        <div ref={zonaAviso} className="space-y-3">
-          <Aviso>{aviso.texto}</Aviso>
-          {aviso.empezarDeNuevo ? (
-            <a href="/" className={claseBoton('contorno', 'w-full')}>
-              Empezar de nuevo
-            </a>
-          ) : null}
-        </div>
-      ) : null}
+      <AvisosDeAccion captcha={captcha} texto={aviso?.texto ?? null}>
+        {aviso?.empezarDeNuevo ? (
+          <a href="/" className={claseBoton('contorno', 'w-full')}>
+            Empezar de nuevo
+          </a>
+        ) : null}
+      </AvisosDeAccion>
 
       <BarraInferior>
         <div className="min-w-0 flex-1">

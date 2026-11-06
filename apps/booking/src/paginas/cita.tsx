@@ -11,14 +11,13 @@ import {
 } from '@cds/shared';
 import { BarraInferior } from '@/componentes/barra-inferior';
 import { ErrorConsulta } from '@/componentes/error-consulta';
-import { AvisoVerificacionNoCarga, TEXTO_CAPTCHA, useCaptcha, type Captcha } from '@/componentes/captcha';
+import { AvisosDeAccion, TEXTO_CAPTCHA, esCaptchaRechazado, useCaptcha } from '@/componentes/captcha';
 import { Aviso } from '@/componentes/ui/aviso';
 import { Boton, claseBoton } from '@/componentes/ui/boton';
 import { ErrorApi, guardarTokenGestion, peticion } from '@/lib/api';
-import { esErrorDeRed, mensajeDeError } from '@/lib/errores';
+import { ERRORES_DE_HORARIO, esErrorDeRed, mensajeDeError } from '@/lib/errores';
 import { etiquetaFechaHora, fechaDeHoy, formatearPrecio } from '@/lib/formato';
 import { claveOpciones, pedirOpciones } from './reservar/consultas';
-import { ERRORES_DE_HORARIO } from './reservar/paso-datos';
 import { enlaceDeGestion } from './reservar/paso-listo';
 import { PasoFecha } from './reservar/paso-fecha';
 import { PasoHora } from './reservar/paso-hora';
@@ -282,6 +281,10 @@ function GestionCita({ token, alCambiarToken }: PropsGestion) {
 
 // ================================================================ el detalle
 
+/** Un botón `disabled` no recibe foco: el motivo se enlaza con `aria-describedby` para que el lector de pantalla lo lea. */
+const ID_MOTIVO_CANCELAR = 'motivo-cancelar';
+const ID_MOTIVO_REPROGRAMAR = 'motivo-reprogramar';
+
 interface PropsDetalle {
   cita: MiReservaPublica;
   zonaHoraria: string;
@@ -359,19 +362,34 @@ function Detalle({
 
       <div className="space-y-5">
         <div className="space-y-2">
-          <Boton className="w-full" disabled={!cita.puedeReprogramar} onClick={alReprogramar}>
+          <Boton
+            className="w-full"
+            disabled={!cita.puedeReprogramar}
+            aria-describedby={cita.puedeReprogramar ? undefined : ID_MOTIVO_REPROGRAMAR}
+            onClick={alReprogramar}
+          >
             Cambiar fecha u hora
           </Boton>
           {!cita.puedeReprogramar ? (
-            <p className="text-muted-foreground text-sm">{motivoReprogramar(cita)}</p>
+            <p id={ID_MOTIVO_REPROGRAMAR} className="text-muted-foreground text-sm">
+              {motivoReprogramar(cita)}
+            </p>
           ) : null}
         </div>
         <div className="space-y-2">
-          <Boton variante="contorno" className="w-full" disabled={!cita.puedeCancelar} onClick={alCancelar}>
+          <Boton
+            variante="contorno"
+            className="w-full"
+            disabled={!cita.puedeCancelar}
+            aria-describedby={cita.puedeCancelar ? undefined : ID_MOTIVO_CANCELAR}
+            onClick={alCancelar}
+          >
             Cancelar mi cita
           </Boton>
           {!cita.puedeCancelar ? (
-            <p className="text-muted-foreground text-sm">{motivoCancelar(cita)}</p>
+            <p id={ID_MOTIVO_CANCELAR} className="text-muted-foreground text-sm">
+              {motivoCancelar(cita)}
+            </p>
           ) : null}
         </div>
       </div>
@@ -431,7 +449,7 @@ function ConfirmarCancelacion({ cita, zonaHoraria, alConservar, alCancelarse, al
             cancelar.mutate(captcha.token);
           }}
         >
-          {cancelar.isPending ? 'Cancelando…' : 'Sí, cancelar mi cita'}
+          {cancelar.isPending ? 'Cancelando…' : captcha.token === null ? 'Verificando…' : 'Sí, cancelar mi cita'}
         </Boton>
         <Boton variante="contorno" className="w-full" disabled={cancelar.isPending} onClick={alConservar}>
           Conservar mi cita
@@ -569,7 +587,7 @@ function Reprogramar({ cita, servicioIds, opciones, alVolver, alReprogramarse, a
             disabled={captcha.token === null || reprogramar.isPending}
             onClick={confirmar}
           >
-            {reprogramar.isPending ? 'Guardando…' : 'Confirmar el cambio'}
+            {reprogramar.isPending ? 'Guardando…' : captcha.token === null ? 'Verificando…' : 'Confirmar el cambio'}
           </Boton>
         </BarraInferior>
       ) : null}
@@ -581,30 +599,5 @@ function Reprogramar({ cita, servicioIds, opciones, alVolver, alReprogramarse, a
 
 /** Texto de un error de la acción. El captcha rechazado no es un dato que el cliente haya escrito. */
 function textoDeError(error: unknown): string {
-  if (error instanceof ErrorApi && error.codigo === CODIGOS_ERROR.VALIDACION && error.campos?.tokenTurnstile) {
-    return TEXTO_CAPTCHA;
-  }
-  return mensajeDeError(error);
-}
-
-/** Lo que falló al cargar la verificación o al enviar, a la vista (se lleva a pantalla: el cliente no lo busca). */
-function AvisosDeAccion({ captcha, texto }: { captcha: Captcha; texto: string | null }) {
-  const zona = useRef<HTMLDivElement>(null);
-  const visible = captcha.fallo || texto !== null;
-  useEffect(() => {
-    if (visible) zona.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-  }, [visible]);
-
-  if (captcha.fallo) {
-    return (
-      <div ref={zona}>
-        <AvisoVerificacionNoCarga alReintentar={captcha.reintentarWidget} />
-      </div>
-    );
-  }
-  return texto ? (
-    <div ref={zona}>
-      <Aviso>{texto}</Aviso>
-    </div>
-  ) : null;
+  return esCaptchaRechazado(error) ? TEXTO_CAPTCHA : mensajeDeError(error);
 }

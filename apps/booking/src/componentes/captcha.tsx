@@ -1,7 +1,9 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { CODIGOS_ERROR } from '@cds/shared';
 import { Turnstile } from '@/componentes/turnstile';
 import { Aviso } from '@/componentes/ui/aviso';
 import { Boton } from '@/componentes/ui/boton';
+import { ErrorApi } from '@/lib/api';
 
 /**
  * El captcha rechazado llega con el mensaje genérico de `VALIDACION`
@@ -77,4 +79,48 @@ export function AvisoVerificacionNoCarga({ alReintentar }: { alReintentar: () =>
       </Boton>
     </div>
   );
+}
+
+/**
+ * ¿La API rechazó el captcha? Llega como `VALIDACION` con el fallo en el campo
+ * `tokenTurnstile`; el texto para el cliente es `TEXTO_CAPTCHA`, no el genérico.
+ */
+export function esCaptchaRechazado(error: unknown): boolean {
+  return error instanceof ErrorApi && error.codigo === CODIGOS_ERROR.VALIDACION && !!error.campos?.tokenTurnstile;
+}
+
+/**
+ * Lo que falló al cargar la verificación o al enviar, a la vista: se lleva a
+ * pantalla porque el cliente no lo busca. Si el widget no cargó, ese aviso
+ * manda; si no, el texto del error, con lo que la pantalla quiera añadir
+ * (`children`, por ejemplo un enlace para empezar de nuevo).
+ */
+export function AvisosDeAccion({
+  captcha,
+  texto,
+  children,
+}: {
+  captcha: Captcha;
+  texto: string | null;
+  children?: ReactNode;
+}) {
+  const zona = useRef<HTMLDivElement>(null);
+  const visible = captcha.fallo || texto !== null;
+  useEffect(() => {
+    if (visible) zona.current?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  }, [visible, texto]);
+
+  if (captcha.fallo) {
+    return (
+      <div ref={zona}>
+        <AvisoVerificacionNoCarga alReintentar={captcha.reintentarWidget} />
+      </div>
+    );
+  }
+  return texto ? (
+    <div ref={zona} className="space-y-3">
+      <Aviso>{texto}</Aviso>
+      {children}
+    </div>
+  ) : null;
 }

@@ -35,3 +35,20 @@ export function mensajeDeError(error: unknown): string {
 /** ¿Es la caída de conexión que produce el cliente HTTP? */
 export const esErrorDeRed = (error: unknown) =>
   error instanceof ErrorApi && error.codigo === CODIGOS_ERROR.ERROR_RED;
+
+/**
+ * Errores que significan «esa hora ya no sirve»: no se arreglan en el formulario
+ * que los recibió, sino eligiendo otra hora. Es conocimiento del dominio de
+ * errores, no de una pantalla: lo usan el asistente de reserva y la gestión de
+ * la cita.
+ */
+export const ERRORES_DE_HORARIO: ReadonlySet<string> = new Set([
+  CODIGOS_ERROR.RESERVA_SOLAPADA,
+  CODIGOS_ERROR.ANTELACION_INSUFICIENTE,
+  CODIGOS_ERROR.HORARIO_FUERA_DE_JORNADA,
+  CODIGOS_ERROR.BARBERO_NO_TRABAJA_ESE_DIA,
+  CODIGOS_ERROR.SEDE_CERRADA,
+  CODIGOS_ERROR.DIA_NO_LABORABLE,
+  CODIGOS_ERROR.RESERVA_EN_EL_PASADO,
+  CODIGOS_ERROR.FECHA_DEMASIADO_LEJANA,
+]);

@@ -417,6 +417,59 @@ describe('cancelar', () => {
   });
 });
 
+// ================================================================ verificación y accesibilidad
+
+describe('mientras el captcha no entrega token', () => {
+  /** El widget se pinta pero no entrega nada: el cliente no ha pasado la verificación todavía. */
+  function sinToken() {
+    vi.stubGlobal('turnstile', { render: vi.fn(() => 'w'), reset: vi.fn(), remove: vi.fn() });
+  }
+
+  it('«Sí, cancelar» dice «Verificando…» en vez de quedarse muerto', async () => {
+    const u = usuario();
+    montar();
+    await hastaDetalle();
+    sinToken();
+    await u.click(botonCancelar());
+    const boton = await screen.findByRole('button', { name: /verificando/i });
+    expect(boton).toBeDisabled();
+    expect(screen.queryByRole('button', { name: /sí, cancelar/i })).not.toBeInTheDocument();
+  });
+
+  it('«Confirmar el cambio» dice «Verificando…» hasta tener token', async () => {
+    const u = usuario();
+    montar();
+    await hastaDetalle();
+    sinToken();
+    await u.click(botonReprogramar());
+    await u.click(await screen.findByRole('button', { name: /lunes, 9 de noviembre/ }));
+    await u.click(await screen.findByRole('button', { name: '9:30 a. m.' }));
+    expect(await screen.findByRole('button', { name: /verificando/i })).toBeDisabled();
+  });
+});
+
+describe('el motivo de un botón desactivado se lee con lector de pantalla', () => {
+  it('cancelar lo describe con su motivo', async () => {
+    citaActual = cita({ puedeCancelar: false });
+    montar();
+    await hastaDetalle();
+    expect(botonCancelar()).toHaveAccessibleDescription(MENSAJES_ERROR.FUERA_DE_PLAZO_CANCELACION);
+  });
+
+  it('reprogramar lo describe con el suyo', async () => {
+    citaActual = cita({ puedeReprogramar: false });
+    montar();
+    await hastaDetalle();
+    expect(botonReprogramar()).toHaveAccessibleDescription(MENSAJES_ERROR.FUERA_DE_PLAZO_REPROGRAMACION);
+  });
+
+  it('un botón activo no lleva descripción', async () => {
+    montar();
+    await hastaDetalle();
+    expect(botonCancelar()).not.toHaveAttribute('aria-describedby');
+  });
+});
+
 // ================================================================ reprogramar
 
 async function hastaHoras(u: ReturnType<typeof usuario>) {
