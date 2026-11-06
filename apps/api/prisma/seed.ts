@@ -435,6 +435,33 @@ async function main() {
   }
   console.log(`  ${categorias.length} categorías de producto`);
 
+  // ------------------------------------------------ PLANTILLAS DE NOTIFICACIÓN
+  // `clave` es el identificador estable que usa el código. En `update` va todo
+  // el contenido salvo `activa`: una nueva siembra pone al día el texto, pero no
+  // reactiva una plantilla que el dueño desactivó a propósito.
+  const plantillaConfirmacion = {
+    canal: 'EMAIL' as const,
+    nombre: 'Confirmación de cita (correo)',
+    asunto: 'Tu cita {{codigo}} quedó registrada',
+    cuerpo: [
+      'Hola {{cliente}}:',
+      '',
+      'Recibimos tu cita en {{sede}} con {{barbero}} para el {{fecha}}.',
+      'Tu código es {{codigo}}.',
+      '',
+      'Puedes verla, cancelarla o cambiar la hora aquí:',
+      '{{enlace}}',
+      '',
+      'Este enlace es personal: no lo compartas.',
+    ].join('\n'),
+  };
+  await prisma.plantillaNotificacion.upsert({
+    where: { clave: 'reserva.confirmada' },
+    update: plantillaConfirmacion,
+    create: { clave: 'reserva.confirmada', ...plantillaConfirmacion },
+  });
+  console.log('  1 plantilla de notificación');
+
   console.log('\nListo.\n');
   console.log('Puedes entrar al panel con cualquiera de estos correos:');
   for (const u of usuarios) console.log(`  ${u.email.padEnd(40)} ${u.rol}`);

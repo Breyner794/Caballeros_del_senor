@@ -1,4 +1,5 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { CODIGOS_ERROR, ESTADOS_QUE_OCUPAN, puedeTransicionar } from '@cds/shared';
 import type {
   CancelarReservaPublicaDto,
@@ -11,8 +12,9 @@ import type {
 import { PrismaService } from '../../comun/prisma/prisma.service.js';
 import { ConfiguracionNegocioService } from '../../comun/configuracion/configuracion-negocio.service.js';
 import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
-import { aFechaLocal, limitesDelRango } from '../../comun/tiempo/tiempo.js';
+import { aFechaLocal, fechaLegible, limitesDelRango } from '../../comun/tiempo/tiempo.js';
 import { DisponibilidadService } from '../disponibilidad/disponibilidad.service.js';
+import { NotificacionesService } from '../notificaciones/notificaciones.service.js';
 import { ReservasService } from '../reservas/reservas.service.js';
 import { aReservaPublica, type ReservaEntrada } from './dto-publico.js';
 import type { ReservaResuelta } from './guard-token-gestion.js';
@@ -37,7 +39,11 @@ export class PublicoReservasService {
     private readonly motorDisponibilidad: DisponibilidadService,
     private readonly reservas: ReservasService,
     private readonly lecturas: PublicoService,
+    private readonly notificaciones: NotificacionesService,
+    private readonly entorno: ConfigService,
   ) {}
+
+  private readonly logger = new Logger(PublicoReservasService.name);
 
   // ------------------------------------------------------ Asignación de barbero
 
@@ -141,7 +147,7 @@ export class PublicoReservasService {
     await this.verificarVisibleEnWeb(datos, servicioIds);
     const inicioEn = new Date(datos.inicioEn);
 
-    let creada: { id: string; codigo: string };
+    let creada: { id: string; codigo: string; clienteId: string | null };
     try {
       const barberoId =
         datos.barberoId ??
@@ -180,7 +186,65 @@ export class PublicoReservasService {
     }
 
     const fila = await this.releerTrasEscribir(creada);
-    return { ...aReservaPublica(fila), tokenGestion: fila.tokenGestion };
+    const respuesta = { ...aReservaPublica(fila), tokenGestion: fila.tokenGestion };
+
+    // Ya está confirmada la escritura. El correo va después y sin esperarlo: el
+    // cliente ya tiene su código en pantalla, y un proveedor lento o caído no
+    // debe retrasar ni deshacer la cita. `notificarConfirmacion` no lanza.
+    void this.notificarConfirmacion(creada.id, creada.clienteId, fila);
+
+    return respuesta;
+  }
+
+  /**
+   * Correo de confirmación. Solo sale si la ficha tiene correo Y `aceptaEmail`:
+   * el consentimiento se marca solo cuando el cliente escribe su correo en la
+   * web, y una ficha con correo viejo pero sin consentimiento no recibe nada.
+   * El destino sale de la ficha, no del cuerpo de la petición.
+   *
+   * El enlace lleva el token en el fragmento (`#`): no viaja al servidor, así que
+   * no queda en logs de acceso ni en el `Referer`. Nunca se escribe en un log
+   * desde aquí.
+   */
+  private async notificarConfirmacion(
+    reservaId: string,
+    clienteId: string | null,
+    fila: ReservaEntrada & { tokenGestion: string },
+  ): Promise<void> {
+    try {
+      if (!clienteId) return;
+      const ficha = await this.prisma.cliente.findUnique({
+        where: { id: clienteId },
+        select: { nombreCompleto: true, email: true, aceptaEmail: true },
+      });
+      if (!ficha?.email || !ficha.aceptaEmail) return;
+
+      const { zonaHoraria } = await this.configuracion.obtener();
+      const origen = this.entorno.get<string>('BOOKING_ORIGIN') ?? 'http://localhost:5174';
+      await this.notificaciones.encolar({
+        reservaId,
+        clienteId,
+        clave: 'reserva.confirmada',
+        canal: 'EMAIL',
+        destino: ficha.email,
+        variables: {
+          cliente: ficha.nombreCompleto,
+          fecha: fechaLegible(fila.inicioEn, zonaHoraria),
+          barbero: fila.barbero.nombre,
+          sede: fila.sede.nombre,
+          codigo: fila.codigo,
+          enlace: `${origen}/cita#${fila.tokenGestion}`,
+        },
+        // La fila de la notificación guarda qué se envió, menos la llave de la cita.
+        omitirDelPayload: ['enlace'],
+      });
+    } catch (fallo) {
+      this.logger.error(
+        `No se pudo preparar la confirmación de la reserva ${fila.codigo}: ${
+          fallo instanceof Error ? fallo.message : String(fallo)
+        }`,
+      );
+    }
   }
 
   // ------------------------------------------- Gestión con el token de la cita

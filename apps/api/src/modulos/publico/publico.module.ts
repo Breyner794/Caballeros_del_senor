@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { DisponibilidadModule } from '../disponibilidad/disponibilidad.module.js';
+import { NotificacionesModule } from '../notificaciones/notificaciones.module.js';
 import { ReservasModule } from '../reservas/reservas.module.js';
 import { PublicoController } from './publico.controller.js';
 import { PublicoReservasService } from './publico-reservas.service.js';
@@ -10,7 +11,7 @@ import { PublicoService } from './publico.service.js';
  * `ReservasModule` aporta el dominio de la cita: la web no reimplementa sus reglas.
  */
 @Module({
-  imports: [DisponibilidadModule, ReservasModule],
+  imports: [DisponibilidadModule, ReservasModule, NotificacionesModule],
   controllers: [PublicoController],
   providers: [PublicoService, PublicoReservasService],
 })

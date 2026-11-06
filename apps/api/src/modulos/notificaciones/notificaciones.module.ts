@@ -1,15 +1,26 @@
 import { Module } from '@nestjs/common';
+import { AdaptadorEmail } from './adaptador-email.js';
 import { CorreoService } from './correo.service.js';
+import { ADAPTADORES_NOTIFICACION, NotificacionesService } from './notificaciones.service.js';
 
 /**
  * Canales de salida hacia clientes y usuarios.
  *
- * Hoy solo correo (Brevo). Cuando entre WhatsApp Cloud API se suma aqui su
- * servicio y el resto del sistema no se entera: los modulos de dominio piden
- * "notifica esto" y este modulo decide por que canal.
+ * Hoy solo correo (Brevo). Para sumar WhatsApp Cloud API: un adaptador nuevo,
+ * una entrada en el mapa `ADAPTADORES_NOTIFICACION` y una fila de plantilla en el
+ * seed. Los módulos de dominio piden "notifica esto" y no se enteran.
  */
 @Module({
-  providers: [CorreoService],
-  exports: [CorreoService],
+  providers: [
+    CorreoService,
+    AdaptadorEmail,
+    {
+      provide: ADAPTADORES_NOTIFICACION,
+      useFactory: (email: AdaptadorEmail) => ({ EMAIL: email }),
+      inject: [AdaptadorEmail],
+    },
+    NotificacionesService,
+  ],
+  exports: [CorreoService, NotificacionesService],
 })
 export class NotificacionesModule {}

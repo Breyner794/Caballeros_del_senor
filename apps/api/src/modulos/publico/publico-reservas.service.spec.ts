@@ -25,10 +25,20 @@ function montarServicio(
   prisma: ReturnType<typeof crearPrismaDoble>,
   disponibilidad: ReturnType<typeof crearDisponibilidadDoble>,
   reservas: unknown,
+  notificaciones: unknown = { encolar: vi.fn(async () => undefined) },
 ): PublicoReservasService {
   const config = crearConfiguracionDoble(configuracion()) as never;
   const lecturas = new PublicoService(prisma as never, config, disponibilidad as never);
-  return new PublicoReservasService(prisma as never, config, disponibilidad as never, reservas as never, lecturas);
+  const entorno = { get: (clave: string) => (clave === 'BOOKING_ORIGIN' ? 'https://reservas.test' : undefined) };
+  return new PublicoReservasService(
+    prisma as never,
+    config,
+    disponibilidad as never,
+    reservas as never,
+    lecturas,
+    notificaciones as never,
+    entorno as never,
+  );
 }
 
 // ======================== Asignación automática ==============================
@@ -389,6 +399,91 @@ describe('PublicoReservasService.crearReserva', () => {
     expect(respuesta.tokenGestion).toBe('tok_unico');
   });
 
+  describe('confirmación por correo', () => {
+    let notificaciones: { encolar: ReturnType<typeof vi.fn> };
+
+    const fichaConCorreo = (cambios: Record<string, unknown> = {}) => ({
+      nombreCompleto: 'Juan Pérez',
+      email: 'juan@correo.co',
+      aceptaEmail: true,
+      ...cambios,
+    });
+
+    beforeEach(() => {
+      notificaciones = { encolar: vi.fn(async () => undefined) };
+      reservas.crear.mockResolvedValue({ id: ID.reserva, codigo: 'CDS-A1B2', clienteId: ID.cliente });
+      prisma.cliente.findUnique.mockResolvedValue(fichaConCorreo());
+      servicio = montarServicio(prisma, disponibilidad, reservas, notificaciones);
+    });
+
+    it('encola la confirmación con el enlace de gestión en el fragmento', async () => {
+      await servicio.crearReserva(datosWeb());
+      await vi.waitFor(() => expect(notificaciones.encolar).toHaveBeenCalledOnce());
+      expect(notificaciones.encolar).toHaveBeenCalledWith({
+        reservaId: ID.reserva,
+        clienteId: ID.cliente,
+        clave: 'reserva.confirmada',
+        canal: 'EMAIL',
+        destino: 'juan@correo.co',
+        variables: {
+          cliente: 'Juan Pérez',
+          fecha: expect.stringContaining('noviembre'),
+          barbero: 'Andrés',
+          sede: 'Centro',
+          codigo: 'CDS-A1B2',
+          // El token va en el hash: un fragmento no viaja al servidor ni al Referer.
+          enlace: 'https://reservas.test/cita#tok_unico',
+        },
+        omitirDelPayload: ['enlace'],
+      });
+    });
+
+    it('usa la ficha del cliente, no el correo del cuerpo', async () => {
+      await servicio.crearReserva(datosWeb({ cliente: { nombreCompleto: 'J', telefono: '+573001234567', email: 'otro@x.co' } }));
+      await vi.waitFor(() => expect(notificaciones.encolar).toHaveBeenCalled());
+      expect(notificaciones.encolar.mock.calls[0]![0]).toMatchObject({ destino: 'juan@correo.co' });
+    });
+
+    it('no encola nada si la ficha no tiene correo', async () => {
+      prisma.cliente.findUnique.mockResolvedValue(fichaConCorreo({ email: null }));
+      await servicio.crearReserva(datosWeb());
+      await vi.waitFor(() => expect(prisma.cliente.findUnique).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(notificaciones.encolar).not.toHaveBeenCalled();
+    });
+
+    it('no encola nada si el cliente no aceptó correo, aunque la ficha tenga uno', async () => {
+      // `aceptaEmail` solo se marca cuando el cliente escribe su correo en la web.
+      prisma.cliente.findUnique.mockResolvedValue(fichaConCorreo({ aceptaEmail: false }));
+      await servicio.crearReserva(datosWeb());
+      await vi.waitFor(() => expect(prisma.cliente.findUnique).toHaveBeenCalled());
+      await vi.advanceTimersByTimeAsync(0);
+      expect(notificaciones.encolar).not.toHaveBeenCalled();
+    });
+
+    it('un fallo de notificación no tumba la reserva', async () => {
+      notificaciones.encolar.mockRejectedValue(new Error('boom'));
+      await expect(servicio.crearReserva(datosWeb())).resolves.toMatchObject({ tokenGestion: 'tok_unico' });
+    });
+
+    it('un fallo al leer la ficha tampoco tumba la reserva', async () => {
+      prisma.cliente.findUnique.mockRejectedValue(new Error('base caída'));
+      await expect(servicio.crearReserva(datosWeb())).resolves.toMatchObject({ codigo: 'CDS-A1B2' });
+    });
+
+    it('no espera al proveedor para responder', async () => {
+      notificaciones.encolar.mockReturnValue(new Promise(() => undefined));
+      await expect(servicio.crearReserva(datosWeb())).resolves.toMatchObject({ tokenGestion: 'tok_unico' });
+    });
+
+    it('si la reserva falla no se encola nada', async () => {
+      reservas.crear.mockRejectedValue(new Error('x'));
+      await expect(servicio.crearReserva(datosWeb())).rejects.toThrow();
+      expect(prisma.cliente.findUnique).not.toHaveBeenCalled();
+      expect(notificaciones.encolar).not.toHaveBeenCalled();
+    });
+  });
+
   it('responde con la forma pública exacta y pide todas las columnas que emiten los mapeadores', async () => {
     const respuesta = await servicio.crearReserva(datosWeb());
     expect(Object.keys(respuesta).sort()).toEqual(
@@ -532,6 +627,8 @@ describe('PublicoReservasService: gestión con token', () => {
       disponibilidad as never,
       reservas as never,
       lecturas,
+      { encolar: vi.fn() } as never,
+      { get: () => undefined } as never,
     );
   };
 
