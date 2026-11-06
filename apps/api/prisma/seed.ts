@@ -436,31 +436,54 @@ async function main() {
   console.log(`  ${categorias.length} categorías de producto`);
 
   // ------------------------------------------------ PLANTILLAS DE NOTIFICACIÓN
-  // `clave` es el identificador estable que usa el código. En `update` va todo
-  // el contenido salvo `activa`: una nueva siembra pone al día el texto, pero no
+  // La clave es el evento y es única por canal (`clave` + `canal`): la plantilla
+  // de WhatsApp de un evento convive con la de correo. En `update` va todo el
+  // contenido salvo `activa`: una nueva siembra pone al día el texto, pero no
   // reactiva una plantilla que el dueño desactivó a propósito.
-  const plantillaConfirmacion = {
-    canal: 'EMAIL' as const,
-    nombre: 'Confirmación de cita (correo)',
-    asunto: 'Tu cita {{codigo}} quedó registrada',
-    cuerpo: [
-      'Hola {{cliente}}:',
-      '',
-      'Recibimos tu cita en {{sede}} con {{barbero}} para el {{fecha}}.',
-      'Tu código es {{codigo}}.',
-      '',
-      'Puedes verla, cancelarla o cambiar la hora aquí:',
-      '{{enlace}}',
-      '',
-      'Este enlace es personal: no lo compartas.',
-    ].join('\n'),
-  };
-  await prisma.plantillaNotificacion.upsert({
-    where: { clave: 'reserva.confirmada' },
-    update: plantillaConfirmacion,
-    create: { clave: 'reserva.confirmada', ...plantillaConfirmacion },
-  });
-  console.log('  1 plantilla de notificación');
+  const plantillas = [
+    {
+      clave: 'reserva.confirmada',
+      canal: 'EMAIL' as const,
+      nombre: 'Confirmación de cita (correo)',
+      asunto: 'Tu cita {{codigo}} quedó registrada',
+      cuerpo: [
+        'Hola {{cliente}}:',
+        '',
+        'Recibimos tu cita en {{sede}} con {{barbero}} para el {{fecha}}.',
+        'Tu código es {{codigo}}.',
+        '',
+        'Puedes verla, cancelarla o cambiar la hora aquí:',
+        '{{enlace}}',
+        '',
+        'Este enlace es personal: no lo compartas.',
+      ].join('\n'),
+    },
+    {
+      // Al reprogramar el enlace anterior deja de servir: este correo trae el nuevo.
+      clave: 'reserva.reprogramada',
+      canal: 'EMAIL' as const,
+      nombre: 'Cita reprogramada (correo)',
+      asunto: 'Tu cita {{codigo}} cambió de hora',
+      cuerpo: [
+        'Hola {{cliente}}:',
+        '',
+        'Tu cita {{codigo}} en {{sede}} con {{barbero}} quedó para el {{fecha}}.',
+        '',
+        'Este es tu enlace nuevo para verla, cancelarla o cambiar la hora:',
+        '{{enlace}}',
+        '',
+        'El enlace del correo anterior ya no funciona. Este es personal: no lo compartas.',
+      ].join('\n'),
+    },
+  ];
+  for (const { clave, canal, nombre, asunto, cuerpo } of plantillas) {
+    await prisma.plantillaNotificacion.upsert({
+      where: { clave_canal: { clave, canal } },
+      update: { nombre, asunto, cuerpo },
+      create: { clave, canal, nombre, asunto, cuerpo },
+    });
+  }
+  console.log(`  ${plantillas.length} plantillas de notificación`);
 
   console.log('\nListo.\n');
   console.log('Puedes entrar al panel con cualquiera de estos correos:');

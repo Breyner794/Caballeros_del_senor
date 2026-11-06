@@ -190,27 +190,31 @@ export class PublicoReservasService {
 
     // Ya está confirmada la escritura. El correo va después y sin esperarlo: el
     // cliente ya tiene su código en pantalla, y un proveedor lento o caído no
-    // debe retrasar ni deshacer la cita. `notificarConfirmacion` no lanza.
-    void this.notificarConfirmacion(creada.id, creada.clienteId, fila);
+    // debe retrasar ni deshacer la cita. `notificarCita` no lanza.
+    void this.notificarCita('reserva.confirmada', creada, fila);
 
     return respuesta;
   }
 
   /**
-   * Correo de confirmación. Solo sale si la ficha tiene correo Y `aceptaEmail`:
+   * Correo de la cita (`reserva.confirmada` o `reserva.reprogramada`). Solo sale si la ficha tiene correo Y `aceptaEmail`:
    * el consentimiento se marca solo cuando el cliente escribe su correo en la
    * web, y una ficha con correo viejo pero sin consentimiento no recibe nada.
    * El destino sale de la ficha, no del cuerpo de la petición.
+   *
+   * Al reprogramar el dominio rota el token: el correo de la creación queda con
+   * un enlace muerto, así que se envía otro con el nuevo (`fecha` es la hora nueva).
    *
    * El enlace lleva el token en el fragmento (`#`): no viaja al servidor, así que
    * no queda en logs de acceso ni en el `Referer`. Nunca se escribe en un log
    * desde aquí.
    */
-  private async notificarConfirmacion(
-    reservaId: string,
-    clienteId: string | null,
+  private async notificarCita(
+    clave: 'reserva.confirmada' | 'reserva.reprogramada',
+    reserva: { id: string; clienteId: string | null },
     fila: ReservaEntrada & { tokenGestion: string },
   ): Promise<void> {
+    const { id: reservaId, clienteId } = reserva;
     try {
       if (!clienteId) return;
       const ficha = await this.prisma.cliente.findUnique({
@@ -224,7 +228,7 @@ export class PublicoReservasService {
       await this.notificaciones.encolar({
         reservaId,
         clienteId,
-        clave: 'reserva.confirmada',
+        clave,
         canal: 'EMAIL',
         destino: ficha.email,
         variables: {
@@ -240,7 +244,7 @@ export class PublicoReservasService {
       });
     } catch (fallo) {
       this.logger.error(
-        `No se pudo preparar la confirmación de la reserva ${fila.codigo}: ${
+        `No se pudo preparar «${clave}» de la reserva ${fila.codigo}: ${
           fallo instanceof Error ? fallo.message : String(fallo)
         }`,
       );
@@ -315,7 +319,9 @@ export class PublicoReservasService {
       true,
     );
     const fila = await this.releerTrasEscribir(reserva);
-    return { ...(await this.conBanderas(fila)), tokenGestion: fila.tokenGestion };
+    const respuesta = { ...(await this.conBanderas(fila)), tokenGestion: fila.tokenGestion };
+    void this.notificarCita('reserva.reprogramada', reserva, fila);
+    return respuesta;
   }
 
   /**

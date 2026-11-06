@@ -617,7 +617,10 @@ describe('PublicoReservasService: gestión con token', () => {
   let reservas: { cancelar: ReturnType<typeof vi.fn>; reprogramar: ReturnType<typeof vi.fn> };
   let servicio: PublicoReservasService;
 
-  const montarConLimites = (cambios: Record<string, unknown> = {}) => {
+  const montarConLimites = (
+    cambios: Record<string, unknown> = {},
+    notificaciones: unknown = { encolar: vi.fn() },
+  ) => {
     const config = crearConfiguracionDoble(configuracion(cambios)) as never;
     const disponibilidad = crearDisponibilidadDoble();
     const lecturas = new PublicoService(prisma as never, config, disponibilidad as never);
@@ -627,8 +630,8 @@ describe('PublicoReservasService: gestión con token', () => {
       disponibilidad as never,
       reservas as never,
       lecturas,
-      { encolar: vi.fn() } as never,
-      { get: () => undefined } as never,
+      notificaciones as never,
+      { get: (clave: string) => (clave === 'BOOKING_ORIGIN' ? 'https://reservas.test' : undefined) } as never,
     );
   };
 
@@ -847,6 +850,67 @@ describe('PublicoReservasService: gestión con token', () => {
     it('si falta el token tras reprogramar, es un fallo del servidor con el código de la cita', async () => {
       prisma.reserva.findUnique.mockResolvedValue(filaPublica({ tokenGestion: null }));
       await expect(servicio.reprogramarPropia(resuelta(), datos)).rejects.toThrow(/CDS-A1B2/);
+    });
+
+    describe('correo con el enlace nuevo', () => {
+      let notificaciones: { encolar: ReturnType<typeof vi.fn> };
+
+      beforeEach(() => {
+        notificaciones = { encolar: vi.fn(async () => undefined) };
+        montarConLimites({}, notificaciones);
+        prisma.cliente.findUnique.mockResolvedValue({
+          nombreCompleto: 'Juan Pérez',
+          email: 'juan@correo.co',
+          aceptaEmail: true,
+        });
+      });
+
+      it('encola la reprogramación con el token nuevo y la hora nueva', async () => {
+        await servicio.reprogramarPropia(resuelta(), datos);
+        await vi.waitFor(() => expect(notificaciones.encolar).toHaveBeenCalledOnce());
+        expect(notificaciones.encolar).toHaveBeenCalledWith(
+          expect.objectContaining({
+            reservaId: ID.reserva,
+            clienteId: ID.cliente,
+            clave: 'reserva.reprogramada',
+            canal: 'EMAIL',
+            destino: 'juan@correo.co',
+            omitirDelPayload: ['enlace'],
+            variables: expect.objectContaining({
+              codigo: 'CDS-A1B2',
+              // El de la relectura: el del guard ya no sirve.
+              enlace: 'https://reservas.test/cita#tok_relectura',
+              fecha: expect.any(String),
+            }),
+          }),
+        );
+        expect(JSON.stringify(notificaciones.encolar.mock.calls)).not.toContain('tok_guard');
+      });
+
+      it('no encola sin correo ni consentimiento', async () => {
+        prisma.cliente.findUnique.mockResolvedValue({
+          nombreCompleto: 'J',
+          email: 'juan@correo.co',
+          aceptaEmail: false,
+        });
+        await servicio.reprogramarPropia(resuelta(), datos);
+        await vi.waitFor(() => expect(prisma.cliente.findUnique).toHaveBeenCalled());
+        await vi.advanceTimersByTimeAsync(0);
+        expect(notificaciones.encolar).not.toHaveBeenCalled();
+      });
+
+      it('un fallo de notificación no tumba la reprogramación', async () => {
+        notificaciones.encolar.mockRejectedValue(new Error('boom'));
+        await expect(servicio.reprogramarPropia(resuelta(), datos)).resolves.toMatchObject({
+          tokenGestion: 'tok_relectura',
+        });
+      });
+
+      it('si el dominio rechaza la reprogramación no se encola nada', async () => {
+        reservas.reprogramar.mockRejectedValue(new Error('x'));
+        await expect(servicio.reprogramarPropia(resuelta(), datos)).rejects.toThrow();
+        expect(notificaciones.encolar).not.toHaveBeenCalled();
+      });
     });
 
     it('no filtra la nota interna', async () => {
