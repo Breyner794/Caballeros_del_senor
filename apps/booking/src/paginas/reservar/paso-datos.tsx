@@ -36,21 +36,21 @@ type CampoFormulario = keyof BorradorDatos;
  * no es algo que él haya escrito. Este es el único texto que no sale de
  * `MENSAJES_ERROR`.
  */
-const TEXTO_CAPTCHA = 'No pudimos verificar que eres una persona. Inténtalo de nuevo.';
+export const TEXTO_CAPTCHA = 'No pudimos verificar que eres una persona. Inténtalo de nuevo.';
 
 /**
  * El widget de verificación no cargó (falta la clave o el script no llegó):
  * es un fallo nuestro o de un bloqueador, no de la conexión del cliente, así
  * que no se le dice «revisa tu conexión». Tampoco sale de `MENSAJES_ERROR`.
  */
-const TEXTO_VERIFICACION_NO_CARGA =
+export const TEXTO_VERIFICACION_NO_CARGA =
   'No pudimos cargar la verificación de seguridad. Recarga la página o inténtalo en unos minutos.';
 
 /**
  * Errores que significan «esa hora ya no sirve»: no se arreglan en este
  * formulario, sino eligiendo otra hora, así que los atiende la ruta.
  */
-const ERRORES_DE_HORARIO: ReadonlySet<string> = new Set([
+export const ERRORES_DE_HORARIO: ReadonlySet<string> = new Set([
   CODIGOS_ERROR.RESERVA_SOLAPADA,
   CODIGOS_ERROR.ANTELACION_INSUFICIENTE,
   CODIGOS_ERROR.HORARIO_FUERA_DE_JORNADA,
