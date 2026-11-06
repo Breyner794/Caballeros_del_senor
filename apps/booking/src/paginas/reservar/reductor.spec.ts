@@ -32,6 +32,15 @@ function aplicar(...acciones: AccionReserva[]): EstadoReserva {
   return acciones.reduce(reductor, estadoInicial);
 }
 
+/** Congela el objeto y todo lo que cuelga de él. */
+function deepFreeze<T>(valor: T): T {
+  if (valor !== null && typeof valor === 'object') {
+    Object.values(valor).forEach(deepFreeze);
+    Object.freeze(valor);
+  }
+  return valor;
+}
+
 const retroceder = (veces: number): AccionReserva[] =>
   Array.from({ length: veces }, () => ({ tipo: 'retroceder' }));
 
@@ -147,20 +156,34 @@ describe('reductor del asistente de reserva', () => {
     expect(aplicar(...hastaDatos, { tipo: 'confirmar' }, { tipo: 'elegirSede', sedeId: 'x' }).sedeId).toBe('sede-1');
   });
 
+  it('ignora cambiar de sede o de servicio desde el paso de fecha', () => {
+    const estado = aplicar(...hastaFecha);
+    expect(reductor(estado, { tipo: 'elegirSede', sedeId: 'sede-2' })).toBe(estado);
+    expect(reductor(estado, { tipo: 'alternarServicio', servicio: barba })).toBe(estado);
+  });
+
   it('no confirma fuera del paso de datos', () => {
     expect(aplicar(...hastaHora, { tipo: 'confirmar' }).paso).toBe('hora');
   });
 
-  it('no muta el estado que recibe', () => {
-    const antes = aplicar(...hastaDatos);
-    const copia = structuredClone(antes);
-    const acciones: AccionReserva[] = [
-      { tipo: 'retroceder' },
-      { tipo: 'confirmar' },
-      { tipo: 'elegirSede', sedeId: 'otra' },
-      { tipo: 'alternarServicio', servicio: barba },
-    ];
-    for (const accion of acciones) reductor(antes, accion);
-    expect(antes).toEqual(copia);
+  it('no muta el estado que recibe, ni en las ramas que construyen arrays', () => {
+    // Congelado en profundidad: en modo estricto, cualquier mutación lanza en el sitio exacto.
+    const enServicio = deepFreeze(
+      aplicar({ tipo: 'alternarServicio', servicio: corte }, { tipo: 'elegirSede', sedeId: 'sede-1' }),
+    );
+    const enFecha = deepFreeze(aplicar(...hastaFecha));
+    const enHora = deepFreeze(aplicar(...hastaHora));
+    const enDatos = deepFreeze(aplicar(...hastaDatos));
+
+    // Cada acción se aplica desde un paso donde de verdad actúa (no sale por el guard).
+    expect(reductor(enServicio, { tipo: 'alternarServicio', servicio: barba }).servicios).toEqual([corte, barba]);
+    expect(reductor(enServicio, { tipo: 'alternarServicio', servicio: corte }).servicios).toEqual([]);
+    expect(reductor(enServicio, { tipo: 'elegirSede', sedeId: 'sede-2' }).sedeId).toBe('sede-2');
+    expect(reductor(enServicio, { tipo: 'avanzar' }).paso).toBe('fecha');
+    expect(reductor(enFecha, { tipo: 'elegirFecha', fecha: '2026-11-11' }).fecha).toBe('2026-11-11');
+    expect(reductor(enFecha, { tipo: 'retroceder' }).paso).toBe('servicio');
+    expect(reductor(enHora, { tipo: 'elegirHora', hueco }).hueco).toEqual(hueco);
+    expect(reductor(enDatos, { tipo: 'retroceder' }).paso).toBe('hora');
+    expect(reductor(enDatos, { tipo: 'confirmar' }).paso).toBe('listo');
   });
 });
