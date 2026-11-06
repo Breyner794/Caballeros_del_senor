@@ -239,6 +239,21 @@ describe('PublicoReservasService.elegirBarbero', () => {
     });
   });
 
+  it('lanza RESERVA_EN_EL_PASADO si el hueco existe pero ya pasó', async () => {
+    disponibilidad.delDia.mockResolvedValue(
+      respuestaDelDia([
+        agenda(
+          B1,
+          huecosDe([], { '10:00': 'PASADO' }).map((h) => ({ ...h, inicioEn: INICIO.toISOString() })),
+        ),
+      ]),
+    );
+    await expect(pedir()).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.RESERVA_EN_EL_PASADO,
+      status: 400,
+    });
+  });
+
   it('un hueco cerrado por antelación en un barbero oculto no cambia el motivo', async () => {
     prisma.usuario.findMany.mockResolvedValue([]);
     disponibilidad.delDia.mockResolvedValue(

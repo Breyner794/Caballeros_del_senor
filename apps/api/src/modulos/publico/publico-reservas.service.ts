@@ -101,12 +101,15 @@ export class PublicoReservasService {
       // el motivo que se le debe dar al cliente es ese, el mismo que daría
       // `validarHueco` con un barbero elegido. Con `RESERVA_SOLAPADA` le diríamos
       // que el hueco se ocupó, y la rejilla recalculada tampoco se lo explicaría.
-      const cerradoPorAntelacion = dia.barberos.some(
-        (b) =>
-          idsVisibles.has(b.barberoId) &&
-          b.huecos.some((h) => h.inicioEn === instante && !h.disponible && h.motivo === 'ANTELACION'),
-      );
-      if (cerradoPorAntelacion) {
+      const cerradoPor = (motivo: 'ANTELACION' | 'PASADO') =>
+        dia.barberos.some(
+          (b) =>
+            idsVisibles.has(b.barberoId) &&
+            b.huecos.some((h) => h.inicioEn === instante && !h.disponible && h.motivo === motivo),
+        );
+      // Una hora que ya pasó tampoco «se ocupó»: reintentar con otro hueco igual de pasado no sirve.
+      if (cerradoPor('PASADO')) throw new ErrorNegocio(CODIGOS_ERROR.RESERVA_EN_EL_PASADO, 400);
+      if (cerradoPor('ANTELACION')) {
         const { minAntelacionMinutos } = await this.configuracion.obtener();
         throw new ErrorNegocio(CODIGOS_ERROR.ANTELACION_INSUFICIENTE, 400, { minAntelacionMinutos });
       }

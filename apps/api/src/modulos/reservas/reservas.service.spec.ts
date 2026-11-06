@@ -1047,7 +1047,15 @@ describe('ReservasService.reprogramar', () => {
 
     expect(entorno.prisma.reserva.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: ID.reserva },
+        // La escritura exige que la fila siga como se leyó.
+        where: {
+          id: ID.reserva,
+          estado: 'CONFIRMADA',
+          inicioEn: expect.any(Date),
+          sedeId: ID.sede,
+          barberoId: ID.barbero,
+          tokenGestion: expect.anything(),
+        },
         data: {
           sedeId: ID.sede,
           barberoId: ID.barbero,
@@ -1057,6 +1065,22 @@ describe('ReservasService.reprogramar', () => {
         },
       }),
     );
+  });
+
+  it('si otra petición tocó la cita entre la lectura y la escritura, responde CONFLICTO sin auditar', async () => {
+    const entorno = montar();
+    prepararReprogramacion(entorno);
+    entorno.prisma.reserva.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Record to update not found', {
+        code: 'P2025',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(
+      entorno.servicio.reprogramar(ID.reserva, { inicioEn: nuevaHora.toISOString(), notificar: true }, null, true),
+    ).rejects.toMatchObject({ codigo: CODIGOS_ERROR.CONFLICTO, status: 409 });
+    expect(entorno.auditoria.registrar).not.toHaveBeenCalled();
   });
 
   it('excluye la propia cita al validar el hueco', async () => {

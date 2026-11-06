@@ -211,6 +211,19 @@ describe('reglas de la reserva web con la base real', () => {
     expect(await prisma().reserva.count()).toBe(0);
   });
 
+  it('rechaza una hora que ya pasó, sin barbero elegido, como RESERVA_EN_EL_PASADO y no como «ocupado»', async () => {
+    // Inicio de rejilla ya transcurrido: existe como hueco, con motivo PASADO.
+    const MEDIA_HORA = 30 * 60_000;
+    const yaPaso = new Date(Math.floor((Date.now() - 60_000) / MEDIA_HORA) * MEDIA_HORA);
+
+    const error = await errorDe(() =>
+      publico.crearReserva(cuerpo(30, { inicioEn: yaPaso.toISOString() })),
+    );
+
+    expect(error.codigo).toBe(CODIGOS_ERROR.RESERVA_EN_EL_PASADO);
+    expect(await prisma().reserva.count()).toBe(0);
+  });
+
   it('rechaza una fecha más allá de maxDiasAnticipacion', async () => {
     const dentroDeSesentaDias = horaDeBogota(fechaEnDias(60), '10:00');
 
@@ -418,5 +431,43 @@ describe('carreras entre dos peticiones simultáneas', () => {
       where: { accion: 'CANCELAR_RESERVA', entidadId: resuelta.id },
     });
     expect(asientos).toBe(1);
+  });
+
+  it('dos reprogramaciones simultáneas con el mismo token: una mueve la cita y la otra recibe CONFLICTO, y el token devuelto es el que guarda la base', async () => {
+    const creada = await publico.crearReserva(cuerpo(40));
+    const resuelta = await resolverToken(creada.tokenGestion);
+
+    // Las dos leen la cita antes de que ninguna escriba. Sin la escritura
+    // condicional, las dos rotan el token: la respuesta de una lleva uno que la
+    // base ya no tiene y el cliente pierde el acceso a su cita sin ver un error.
+    const puerta = barrera(2);
+    const original = dominio.obtener.bind(dominio);
+    vi.spyOn(dominio, 'obtener').mockImplementation(async (id) => {
+      const leida = await original(id);
+      await puerta.esperar();
+      return leida;
+    });
+
+    const mover = (hora: string) =>
+      publico.reprogramarPropia(resuelta, {
+        inicioEn: horaDeBogota(DIA, hora),
+        tokenTurnstile: 'token-de-pruebas',
+      });
+    const resultados = await Promise.allSettled([mover('11:00'), mover('12:00')]);
+
+    expect(puerta.llegados).toBe(2);
+
+    const aceptadas = resultados.filter(
+      (r): r is PromiseFulfilledResult<Awaited<ReturnType<typeof mover>>> => r.status === 'fulfilled',
+    );
+    const rechazadas = resultados.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+    expect(aceptadas).toHaveLength(1);
+    expect(rechazadas).toHaveLength(1);
+    expect((rechazadas[0]!.reason as ErrorNegocio).codigo).toBe(CODIGOS_ERROR.CONFLICTO);
+
+    // El token que recibió el cliente es el que hay en la base.
+    const fila = await prisma().reserva.findUniqueOrThrow({ where: { id: resuelta.id } });
+    expect(fila.tokenGestion).toBe(aceptadas[0]!.value.tokenGestion);
+    expect(fila.tokenGestion).not.toBe(creada.tokenGestion);
   });
 });

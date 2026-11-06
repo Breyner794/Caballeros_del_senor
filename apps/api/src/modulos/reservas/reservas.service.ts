@@ -432,25 +432,45 @@ export class ReservasService {
     const finEn = new Date(inicioEn.getTime() + antes.duracionMinutos * 60_000);
     const finConBufferEn = new Date(finEn.getTime() + antes.bufferMinutos * 60_000);
 
-    const despues = await this.prisma.reserva.update({
-      where: { id },
-      data: {
-        sedeId,
-        barberoId,
-        inicioEn,
-        finEn,
-        finConBufferEn,
-        // Asimetría deliberada, no la «arregles». Si mueve la cita el propio
-        // cliente, el token se rota: la respuesta le devuelve el nuevo y el
-        // enlace viejo (que pudo quedar en un correo o en WhatsApp) deja de
-        // servir. Si la mueve recepción NO se rota: nadie le enviaría el
-        // enlace nuevo al cliente, que perdería el acceso a su propia cita, y
-        // como el token identifica la cita (no una sesión) rotarlo aquí no
-        // protege de nada.
-        ...(desdeCliente ? { tokenGestion: tokenGestion() } : {}),
-      },
-      include: INCLUDE_RESERVA,
-    });
+    // Misma ventana que en `cancelar`, y aquí con más consecuencias: dos
+    // reprogramaciones del cliente que leen a la vez rotarían el token dos
+    // veces, y la respuesta de una llevaría un token que la base ya no guarda:
+    // su enlace quedaría muerto sin que nada diera error. Por eso la escritura
+    // exige que la fila siga tal como se leyó (estado, hueco, sede, barbero y
+    // token); si otra petición la tocó en medio, esta recibe `CONFLICTO` y el
+    // cliente puede recargar y reintentar con la cita ya actualizada.
+    let despues;
+    try {
+      despues = await this.prisma.reserva.update({
+        where: {
+          id,
+          estado: antes.estado,
+          inicioEn: antes.inicioEn,
+          sedeId: antes.sedeId,
+          barberoId: antes.barberoId,
+          tokenGestion: antes.tokenGestion ?? undefined,
+        },
+        data: {
+          sedeId,
+          barberoId,
+          inicioEn,
+          finEn,
+          finConBufferEn,
+          // Asimetría deliberada, no la «arregles». Si mueve la cita el propio
+          // cliente, el token se rota: la respuesta le devuelve el nuevo y el
+          // enlace viejo (que pudo quedar en un correo o en WhatsApp) deja de
+          // servir. Si la mueve recepción NO se rota: nadie le enviaría el
+          // enlace nuevo al cliente, que perdería el acceso a su propia cita, y
+          // como el token identifica la cita (no una sesión) rotarlo aquí no
+          // protege de nada.
+          ...(desdeCliente ? { tokenGestion: tokenGestion() } : {}),
+        },
+        include: INCLUDE_RESERVA,
+      });
+    } catch (error) {
+      if (PrismaService.esNoEncontrado(error)) throw new ErrorNegocio(CODIGOS_ERROR.CONFLICTO, 409);
+      throw error;
+    }
 
     const cambioSede = sedeId !== antes.sedeId ? ` y de sede a ${despues.sede.nombre}` : '';
     const cambioBarbero =
