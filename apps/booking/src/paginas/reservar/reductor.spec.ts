@@ -58,6 +58,7 @@ describe('reductor del asistente de reserva', () => {
       paso: 'servicio',
       servicios: [],
       sedeId: null,
+      barberoId: null,
       fecha: null,
       hueco: null,
     });
@@ -166,6 +167,55 @@ describe('reductor del asistente de reserva', () => {
     expect(aplicar(...hastaHora, { tipo: 'confirmar' }).paso).toBe('hora');
   });
 
+  it('elegir barbero solo vale en el paso de hora y limpia la hora elegida', () => {
+    expect(aplicar(...hastaFecha, { tipo: 'elegirBarbero', barberoId: 'b-1' }).barberoId).toBeNull();
+    const estado = aplicar(...hastaHora, { tipo: 'elegirHora', hueco }, { tipo: 'elegirBarbero', barberoId: 'b-1' });
+    expect(estado.barberoId).toBe('b-1');
+    expect(estado.hueco).toBeNull();
+  });
+
+  it('volver a «cualquier barbero» (null) quita el barbero elegido', () => {
+    const estado = aplicar(...hastaHora, { tipo: 'elegirBarbero', barberoId: 'b-1' }, { tipo: 'elegirBarbero', barberoId: null });
+    expect(estado.barberoId).toBeNull();
+  });
+
+  it('cambiar de sede limpia el barbero: uno de otra sede no atiende en la nueva', () => {
+    const estado = aplicar(
+      ...hastaHora,
+      { tipo: 'elegirBarbero', barberoId: 'b-1' },
+      ...retroceder(2),
+      { tipo: 'elegirSede', sedeId: 'sede-2' },
+    );
+    expect(estado.barberoId).toBeNull();
+  });
+
+  it('cambiar de servicio o de fecha conserva el barbero', () => {
+    const base = [...hastaHora, { tipo: 'elegirBarbero', barberoId: 'b-1' } as const];
+    expect(aplicar(...base, ...retroceder(2), { tipo: 'elegirFecha', fecha: '2026-11-11' }).barberoId).toBe('b-1');
+    expect(
+      aplicar(...base, ...retroceder(2), { tipo: 'alternarServicio', servicio: barba }).barberoId,
+    ).toBe('b-1');
+  });
+
+  it('soltarHora quita la hora elegida cuando el servidor dice que se ocupó, desde hora o desde datos', () => {
+    const enHora = aplicar(...hastaDatos, { tipo: 'retroceder' }, { tipo: 'soltarHora' });
+    expect(enHora.hueco).toBeNull();
+    expect(enHora.paso).toBe('hora');
+    expect(enHora.fecha).toBe('2026-11-10');
+
+    const enDatos = aplicar(...hastaDatos, { tipo: 'soltarHora' });
+    expect(enDatos.hueco).toBeNull();
+    expect(enDatos.paso).toBe('datos');
+    expect(enDatos.servicios).toEqual([corte]);
+  });
+
+  it('soltarHora no actúa en los demás pasos', () => {
+    const enFecha = aplicar(...hastaFecha);
+    expect(reductor(enFecha, { tipo: 'soltarHora' })).toBe(enFecha);
+    const enListo = aplicar(...hastaDatos, { tipo: 'confirmar' });
+    expect(reductor(enListo, { tipo: 'soltarHora' })).toBe(enListo);
+  });
+
   it('no muta el estado que recibe, ni en las ramas que construyen arrays', () => {
     // Congelado en profundidad: en modo estricto, cualquier mutación lanza en el sitio exacto.
     const enServicio = deepFreeze(
@@ -185,5 +235,7 @@ describe('reductor del asistente de reserva', () => {
     expect(reductor(enHora, { tipo: 'elegirHora', hueco }).hueco).toEqual(hueco);
     expect(reductor(enDatos, { tipo: 'retroceder' }).paso).toBe('hora');
     expect(reductor(enDatos, { tipo: 'confirmar' }).paso).toBe('listo');
+    expect(reductor(enHora, { tipo: 'elegirBarbero', barberoId: 'b-1' }).barberoId).toBe('b-1');
+    expect(reductor(enHora, { tipo: 'soltarHora' }).hueco).toBeNull();
   });
 });
