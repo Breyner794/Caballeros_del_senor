@@ -122,7 +122,11 @@ beforeEach(() => {
 
   peticionDoblada.mockImplementation((async (ruta: string, opciones?: Opciones) => {
     if (ruta.startsWith('/publico/opciones')) return datosOpciones;
-    if (ruta.startsWith('/publico/calendario')) return CALENDARIO;
+    // El calendario de quien reprograma también excluye la propia cita.
+    if (ruta.startsWith('/publico/mi-reserva/calendario')) {
+      exigirTokenVigente();
+      return CALENDARIO;
+    }
     // La rejilla de quien reprograma va por la ruta que excluye la propia cita.
     if (ruta.startsWith('/publico/mi-reserva/disponibilidad')) {
       exigirTokenVigente();
@@ -433,7 +437,7 @@ describe('reprogramar', () => {
     montar();
     await hastaHoras(u);
     await screen.findByRole('button', { name: '9:30 a. m.' });
-    const [[ruta]] = peticionDoblada.mock.calls.filter(([r]) => r.startsWith('/publico/calendario'));
+    const [[ruta]] = peticionDoblada.mock.calls.filter(([r]) => r.startsWith('/publico/mi-reserva/calendario'));
     expect(ruta).toContain(`sedeId=${SEDE_ID}`);
     expect(ruta).toContain(`servicioIds=${SERVICIO_ID}`);
   });
@@ -552,6 +556,15 @@ describe('reprogramar', () => {
     await screen.findByRole('button', { name: '9:30 a. m.' });
     const [[ruta]] = peticionDoblada.mock.calls.filter(([r]) => r.startsWith('/publico/mi-reserva/disponibilidad'));
     expect(ruta).toContain(`servicioIds=${SERVICIO_ID}`);
+  });
+
+  it('el calendario sale de la ruta que excluye la propia cita: un día lleno salvo la suya sigue pulsable', async () => {
+    const u = usuario();
+    montar();
+    await hastaHoras(u);
+    expect(llamadasA('GET', '/publico/calendario')).toHaveLength(0);
+    expect(llamadasA('GET', '/publico/mi-reserva/calendario')).toHaveLength(1);
+    await screen.findByRole('button', { name: '9:30 a. m.' });
   });
 
   it('la rejilla sale de la ruta que excluye la propia cita, no de la pública', async () => {

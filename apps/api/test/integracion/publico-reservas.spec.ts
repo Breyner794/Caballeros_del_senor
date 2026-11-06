@@ -322,6 +322,28 @@ describe('disponibilidad de quien reprograma', () => {
     expect(comoDuenio.huecos.find((h) => h.inicioEn === DIEZ)?.disponible).toBe(true);
   });
 
+  it('un día lleno salvo la propia cita: el calendario lo apaga al público y lo deja pulsar al dueño', async () => {
+    // La jornada de la suite es de 24 h: se llenan las 48 medias horas de los dos barberos visibles,
+    // salvo el tramo de las 10:00 del barbero A, que es la cita del propio cliente.
+    const creada = await publico.crearReserva(cuerpo(33, { barberoId: IDS_PUBLICO.barberoA }));
+    const resuelta = await resolverToken(creada.tokenGestion);
+    for (let i = 0; i < 48; i++) {
+      const hora = `${String(Math.floor(i / 2)).padStart(2, '0')}:${i % 2 ? '30' : '00'}`;
+      const inicioEn = horaDeBogota(DIA, hora);
+      // La última acaba a las 23:59: el motor no cuenta una cita que termina justo a medianoche (0 min), un borde de la jornada de 24 h de la suite.
+      const minutos = hora === '23:30' ? 29 : 30;
+      if (hora !== '10:00') await insertarCita({ barberoId: IDS_PUBLICO.barberoA, inicioEn, minutos });
+      await insertarCita({ barberoId: IDS_PUBLICO.barberoB, inicioEn, minutos });
+    }
+
+    const consulta = { sedeId: IDS_PUBLICO.sede, desde: DIA, hasta: DIA, servicioIds: [IDS_PUBLICO.servicio] };
+    const comoPublico = await lecturas.calendario(consulta);
+    const comoDuenio = await lecturas.calendario(consulta, resuelta.id);
+
+    expect(comoPublico).toEqual([{ fecha: DIA, hayHueco: false }]);
+    expect(comoDuenio).toEqual([{ fecha: DIA, hayHueco: true }]);
+  });
+
   it('excluir la propia cita no libera las de otros', async () => {
     const creada = await publico.crearReserva(cuerpo(32, { barberoId: IDS_PUBLICO.barberoA }));
     const resuelta = await resolverToken(creada.tokenGestion);

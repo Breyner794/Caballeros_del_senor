@@ -532,6 +532,7 @@ function Reprogramar({ cita, servicioIds, opciones, alVolver, alReprogramarse, a
           hoy={hoy}
           maxDiasAnticipacion={config.maxDiasAnticipacion}
           fechaElegida={null}
+          deMiCita
           alElegirFecha={(f) => {
             setTextoAviso(null);
             setFecha(f);

@@ -65,6 +65,21 @@ export class PublicoController {
     return this.servicio.disponibilidad(filtros, reserva.id);
   }
 
+  /**
+   * El calendario de quien reprograma: sin esto, un día lleno salvo la propia
+   * cita (mover la hora dentro del mismo día) saldría apagado y la rejilla
+   * nunca llegaría a verse. Misma simetría que `miDisponibilidad`.
+   */
+  @Get('mi-reserva/calendario')
+  @Publico()
+  @UseGuards(GuardTokenGestion)
+  miCalendario(
+    @ReservaPorToken() reserva: ReservaResuelta,
+    @Query(validar(consultarCalendarioPublicoSchema)) filtros: ConsultarCalendarioPublicoDto,
+  ) {
+    return this.servicio.calendario(filtros, reserva.id);
+  }
+
   /** Qué días del rango tienen algún hueco. */
   @Get('calendario')
   @Publico()

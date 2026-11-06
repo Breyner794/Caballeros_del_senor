@@ -146,7 +146,11 @@ export class PublicoService {
    * Qué días del rango tienen algún hueco. El rango se recorta a
    * `maxDiasAnticipacion`: más allá de ese tope el cliente no puede reservar.
    */
-  async calendario(filtros: ConsultarCalendarioPublicoDto): Promise<DiaCalendarioPublico[]> {
+  async calendario(
+    filtros: ConsultarCalendarioPublicoDto,
+    /** Solo al reprogramar: la cita del cliente no apaga su propio día. Lo pone el servidor. */
+    excluirReservaId?: string,
+  ): Promise<DiaCalendarioPublico[]> {
     const { hoy, tope } = await this.ventanaDeReserva();
     const hasta = filtros.hasta < tope ? filtros.hasta : tope;
     // Un selector de fechas no ofrece días pasados.
@@ -162,6 +166,7 @@ export class PublicoService {
       servicioIds: filtros.servicioIds,
       aplicarReglasCliente: true,
       soloVisiblesWeb: true,
+      ...(excluirReservaId ? { excluirReservaId } : {}),
     });
     return dias.map((dia) => ({ fecha: dia.fecha, hayHueco: dia.huecosLibres > 0 }));
   }

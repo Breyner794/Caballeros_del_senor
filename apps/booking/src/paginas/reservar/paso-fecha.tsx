@@ -18,6 +18,8 @@ export interface PropsPasoFecha {
   maxDiasAnticipacion: number;
   fechaElegida: string | null;
   alElegirFecha: (fecha: string) => void;
+  /** Quien reprograma ve su propio día disponible (ver `ParametrosCalendario`). */
+  deMiCita?: boolean;
 }
 
 const DIAS_SEMANA = ['L', 'M', 'X', 'J', 'V', 'S', 'D'];
@@ -43,13 +45,14 @@ export function PasoFecha({
   maxDiasAnticipacion,
   fechaElegida,
   alElegirFecha,
+  deMiCita,
 }: PropsPasoFecha) {
   const hasta = sumarDias(hoy, maxDiasAnticipacion);
   const primerMes = primerDiaDelMes(hoy);
   const ultimoMes = primerDiaDelMes(hasta);
   const [mes, setMes] = useState(() => primerDiaDelMes(fechaElegida ?? hoy));
 
-  const parametros = { sedeId, servicioIds, desde: hoy, hasta };
+  const parametros = { sedeId, servicioIds, desde: hoy, hasta, deMiCita };
   const calendario = useQuery({
     queryKey: claveCalendario(parametros),
     queryFn: () => pedirCalendario(parametros),

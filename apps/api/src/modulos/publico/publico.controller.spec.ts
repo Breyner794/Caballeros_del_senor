@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { describe, expect, it, vi } from 'vitest';
 import {
   cancelarReservaPublicaSchema,
+  consultarCalendarioPublicoSchema,
   consultarDisponibilidadPublicaSchema,
   crearReservaPublicaSchema,
   reprogramarReservaPublicaSchema,
@@ -191,6 +192,40 @@ describe('PublicoController: mi-reserva', () => {
     });
     await controlador.miDisponibilidad(reservaDelGuard, filtros);
     expect(servicio.disponibilidad).toHaveBeenCalledWith(filtros, ID.reserva);
+  });
+
+  it('el calendario de la propia cita es un GET bajo mi-reserva, con token y sin captcha', () => {
+    expect(Reflect.getMetadata('method', proto.miCalendario)).toBe(GET);
+    expect(Reflect.getMetadata('path', proto.miCalendario)).toBe('mi-reserva/calendario');
+    expect(Reflect.getMetadata(CLAVE_PUBLICO, proto.miCalendario)).toBe(true);
+    expect(Reflect.getMetadata('__guards__', proto.miCalendario)).toContain(GuardTokenGestion);
+    expect(Reflect.getMetadata('__guards__', proto.miCalendario)).not.toContain(GuardTurnstile);
+  });
+
+  it('el calendario público NO excluye ninguna reserva, mande lo que mande el cliente', async () => {
+    const { controlador, servicio } = montar();
+    const filtros = validarCon(consultarCalendarioPublicoSchema, {
+      sedeId: ID.sede,
+      desde: '2026-11-09',
+      hasta: '2026-11-20',
+      servicioIds: ID.servicioCorte,
+      excluirReservaId: ID.reserva,
+    });
+    await controlador.calendario(filtros);
+    expect(servicio.calendario.mock.calls[0]).toHaveLength(1);
+    expect(filtros).not.toHaveProperty('excluirReservaId');
+  });
+
+  it('miCalendario excluye la cita que resolvió el token', async () => {
+    const { controlador, servicio } = montar();
+    const filtros = validarCon(consultarCalendarioPublicoSchema, {
+      sedeId: ID.sede,
+      desde: '2026-11-09',
+      hasta: '2026-11-20',
+      servicioIds: ID.servicioCorte,
+    });
+    await controlador.miCalendario(reservaDelGuard, filtros);
+    expect(servicio.calendario).toHaveBeenCalledWith(filtros, ID.reserva);
   });
 
   it('Turnstile solo en los POST', () => {

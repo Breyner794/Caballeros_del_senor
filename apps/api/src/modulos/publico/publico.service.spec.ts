@@ -440,6 +440,23 @@ describe('PublicoService.calendario', () => {
     );
   });
 
+  it('sin excluir nada no manda excluirReservaId al motor', async () => {
+    await consultar('2026-11-10', '2026-11-11');
+    expect(disponibilidad.calendario).toHaveBeenCalledWith(
+      expect.not.objectContaining({ excluirReservaId: expect.anything() }),
+    );
+  });
+
+  it('al reprogramar pasa excluirReservaId: el día lleno salvo la propia cita sigue pulsable', async () => {
+    await servicio.calendario(
+      { sedeId: SEDE_A, desde: '2026-11-10', hasta: '2026-11-11', servicioIds: [SERVICIO] },
+      'reserva-propia',
+    );
+    expect(disponibilidad.calendario).toHaveBeenCalledWith(
+      expect.objectContaining({ excluirReservaId: 'reserva-propia', soloVisiblesWeb: true }),
+    );
+  });
+
   it('recorta desde a hoy: no ofrece días pasados', async () => {
     await consultar('2026-10-01', '2026-11-11');
     expect(disponibilidad.calendario).toHaveBeenCalledWith(

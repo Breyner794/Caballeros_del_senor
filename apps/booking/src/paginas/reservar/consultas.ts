@@ -39,14 +39,24 @@ export interface ParametrosCalendario {
   servicioIds: string[];
   desde: string;
   hasta: string;
+  /** Quien reprograma: un día lleno salvo su propia cita sigue disponible (ver `ParametrosDisponibilidad`). */
+  deMiCita?: boolean;
 }
 
 export const claveCalendario = (p: ParametrosCalendario) =>
-  ['publico', 'calendario', p.sedeId, ordenados(p.servicioIds), p.desde, p.hasta] as const;
+  [
+    'publico',
+    'calendario',
+    p.deMiCita ? 'mi-cita' : 'general',
+    p.sedeId,
+    ordenados(p.servicioIds),
+    p.desde,
+    p.hasta,
+  ] as const;
 
 export function pedirCalendario(p: ParametrosCalendario): Promise<DiaCalendarioPublico[]> {
   return peticion<DiaCalendarioPublico[]>(
-    `/publico/calendario?${consulta({
+    `${p.deMiCita ? '/publico/mi-reserva/calendario' : '/publico/calendario'}?${consulta({
       sedeId: p.sedeId,
       desde: p.desde,
       hasta: p.hasta,

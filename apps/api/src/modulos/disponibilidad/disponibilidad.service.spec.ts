@@ -1036,6 +1036,24 @@ describe('DisponibilidadService.calendario', () => {
     });
   });
 
+  it('sin excluir nada, la consulta de citas no filtra ninguna', async () => {
+    const entorno = montar();
+    escenarioCalendario(entorno);
+    await entorno.servicio.calendario(rango);
+    expect(entorno.prisma.reserva.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.not.objectContaining({ id: expect.anything() }) }),
+    );
+  });
+
+  it('con excluirReservaId la propia cita no cuenta: el día no sale lleno por ella', async () => {
+    const entorno = montar();
+    escenarioCalendario(entorno);
+    await entorno.servicio.calendario({ ...rango, excluirReservaId: ID.reserva });
+    expect(entorno.prisma.reserva.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: expect.objectContaining({ id: { not: ID.reserva } }) }),
+    );
+  });
+
   it('marca el día como lleno cuando las citas cubren toda la capacidad', async () => {
     const entorno = montar();
     escenarioCalendario(entorno, { reservas: [ocupacion(480, 1080)] });

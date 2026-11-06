@@ -478,6 +478,8 @@ export class DisponibilidadService {
     aplicarReglasCliente?: boolean;
     /** Solo barberos visibles en la web (el canal público). */
     soloVisiblesWeb?: boolean;
+    /** Al reprogramar, la propia cita no cuenta como ocupada (igual que en `delDia`). */
+    excluirReservaId?: string;
   }): Promise<DiaCalendario[]> {
     const config = await this.configuracion.obtener();
     const zona = config.zonaHoraria;
@@ -531,6 +533,7 @@ export class DisponibilidadService {
           ...(opciones.barberoId ? { barberoId: opciones.barberoId } : {}),
           estado: { in: ['PENDIENTE', 'CONFIRMADA', 'EN_CURSO', 'COMPLETADA'] },
           inicioEn: { gte: inicio, lt: fin },
+          ...(opciones.excluirReservaId ? { id: { not: opciones.excluirReservaId } } : {}),
         },
         select: { barberoId: true, inicioEn: true, finConBufferEn: true },
       }),
