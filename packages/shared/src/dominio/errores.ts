@@ -66,6 +66,8 @@ export const CODIGOS_ERROR = {
   CONFLICTO: 'CONFLICTO',
   ERROR_INTERNO: 'ERROR_INTERNO',
   SERVICIO_EXTERNO_CAIDO: 'SERVICIO_EXTERNO_CAIDO',
+  /** Solo la genera el cliente HTTP del frontend: la petición no llegó a la API. */
+  ERROR_RED: 'ERROR_RED',
 } as const;
 
 export type CodigoError = (typeof CODIGOS_ERROR)[keyof typeof CODIGOS_ERROR];
@@ -128,6 +130,7 @@ export const MENSAJES_ERROR: Record<CodigoError, string> = {
   CONFLICTO: 'Otro usuario modificó esta información. Recarga y vuelve a intentarlo.',
   ERROR_INTERNO: 'Ocurrió un error inesperado. Ya quedó registrado para revisarlo.',
   SERVICIO_EXTERNO_CAIDO: 'Un servicio externo no respondió. Inténtalo en un momento.',
+  ERROR_RED: 'No pudimos conectar. Revisa tu conexión e inténtalo de nuevo.',
 };
 
 /** Forma del cuerpo de error que devuelve siempre la API. */

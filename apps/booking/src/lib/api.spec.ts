@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { CODIGOS_ERROR, MENSAJES_ERROR } from '@cds/shared';
 import { ErrorApi, guardarTokenGestion, peticion } from '@/lib/api';
 
 /** Respuesta JSON mínima, como la devolvería `fetch`. */
@@ -134,5 +135,17 @@ describe('cliente HTTP del canal público', () => {
 
     expect(error.codigo).toBe('ERROR_DESCONOCIDO');
     expect(error.status).toBe(502);
+  });
+
+  it('traduce un fallo de red a ErrorApi con ERROR_RED y status 0', async () => {
+    // Sin conexión `fetch` rechaza con un TypeError sin código. Se traduce
+    // para que las pantallas ramifiquen siempre por `codigo`.
+    vi.mocked(fetch).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+
+    const error = await errorDe(peticion('/publico/sedes'));
+
+    expect(error.codigo).toBe(CODIGOS_ERROR.ERROR_RED);
+    expect(error.mensaje).toBe(MENSAJES_ERROR.ERROR_RED);
+    expect(error.status).toBe(0);
   });
 });

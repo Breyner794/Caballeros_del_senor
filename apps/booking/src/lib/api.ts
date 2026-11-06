@@ -1,4 +1,4 @@
-import type { RespuestaError } from '@cds/shared';
+import { CODIGOS_ERROR, MENSAJES_ERROR, type RespuestaError } from '@cds/shared';
 
 const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api/v1';
 
@@ -48,22 +48,33 @@ export class ErrorApi extends Error {
   }
 }
 
-interface OpcionesPeticion extends Omit<RequestInit, 'body'> {
+interface OpcionesPeticion extends Omit<RequestInit, 'body' | 'headers'> {
   body?: unknown;
+  /** Solo un objeto plano: es lo que `peticion` sabe mezclar con sus cabeceras. */
+  headers?: Record<string, string>;
 }
 
 export async function peticion<T>(ruta: string, opciones: OpcionesPeticion = {}): Promise<T> {
   const { body, headers, ...resto } = opciones;
 
-  const respuesta = await fetch(`${BASE}${ruta}`, {
-    ...resto,
-    headers: {
-      ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
-      ...(tokenGestion ? { 'x-token-gestion': tokenGestion } : {}),
-      ...(headers as Record<string, string> | undefined),
-    },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-  });
+  let respuesta: Response;
+  try {
+    respuesta = await fetch(`${BASE}${ruta}`, {
+      ...resto,
+      headers: {
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(tokenGestion ? { 'x-token-gestion': tokenGestion } : {}),
+        ...headers,
+      },
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    });
+  } catch (causa) {
+    // Una cancelación deliberada no es un fallo de red: se deja pasar tal cual.
+    if (causa instanceof DOMException && causa.name === 'AbortError') throw causa;
+    // Sin conexión `fetch` rechaza con un TypeError sin código. Se traduce para
+    // que las pantallas ramifiquen siempre por `codigo`, también aquí.
+    throw new ErrorApi(CODIGOS_ERROR.ERROR_RED, MENSAJES_ERROR.ERROR_RED, 0);
+  }
 
   if (respuesta.status === 204) return undefined as T;
 
