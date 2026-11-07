@@ -1,4 +1,11 @@
-import { CanActivate, ExecutionContext, HttpStatus, Injectable, Logger } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  HttpStatus,
+  Injectable,
+  Logger,
+  type OnModuleInit,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import type { Request } from 'express';
 import { CODIGOS_ERROR, MAX_TOKEN_TURNSTILE, MENSAJES_ERROR } from '@cds/shared';
@@ -21,10 +28,15 @@ const CAMPO_TOKEN = 'tokenTurnstile';
  * rompería la navegación del calendario. Lee `tokenTurnstile` del cuerpo sin
  * asumir la forma del DTO, así sirve a las tres rutas.
  *
- * Si `TURNSTILE_SECRET_KEY` no está configurada, deja pasar y avisa en el log,
- * igual que `CorreoService` con Brevo: permite desarrollar y probar sin
- * credenciales. El contrapeso es `entorno.ts`, que en producción impide que la
- * API arranque sin la clave.
+ * Si `TURNSTILE_SECRET_KEY` no está configurada, deja pasar, igual que
+ * `CorreoService` con Brevo: permite desarrollar y probar sin credenciales. El
+ * contrapeso es `entorno.ts`, que en producción impide que la API arranque sin
+ * la clave.
+ *
+ * El aviso de que el canal público está levantando SIN CAPTCHA se escribe UNA
+ * VEZ al arrancar y con nivel `error`, no en cada petición: un susurro por
+ * petición es ruido que nadie lee, y este es uno de los dos únicos caminos por
+ * los que esta función puede quedar rota sin que nadie se entere.
  *
  * Falla cerrado, y es deliberado: si Cloudflare no responde, la petición se
  * rechaza con `SERVICIO_EXTERNO_CAIDO`. Un control de seguridad que se abre
@@ -33,17 +45,23 @@ const CAMPO_TOKEN = 'tokenTurnstile';
  * tomándolas por teléfono.
  */
 @Injectable()
-export class GuardTurnstile implements CanActivate {
+export class GuardTurnstile implements CanActivate, OnModuleInit {
   private readonly logger = new Logger(GuardTurnstile.name);
 
   constructor(private readonly config: ConfigService) {}
 
+  /** El único rastro de que el canal público quedó sin captcha: una vez, y alto. */
+  onModuleInit(): void {
+    if (this.config.get<string>('TURNSTILE_SECRET_KEY')) return;
+    this.logger.error(
+      'TURNSTILE_SECRET_KEY no está configurada: el canal público levanta SIN CAPTCHA y cualquier bot puede llenar la agenda de citas falsas. Configúrala antes de exponer la web a internet.',
+    );
+  }
+
   async canActivate(contexto: ExecutionContext): Promise<boolean> {
     const secreto = this.config.get<string>('TURNSTILE_SECRET_KEY');
-    if (!secreto) {
-      this.logger.warn('Turnstile sin configurar: se omite la verificación del captcha.');
-      return true;
-    }
+    // Sin clave se deja pasar en silencio: el aviso ya se dio al arrancar.
+    if (!secreto) return true;
 
     const peticion = contexto.switchToHttp().getRequest<Request>();
     const token = this.extraerToken(peticion.body);

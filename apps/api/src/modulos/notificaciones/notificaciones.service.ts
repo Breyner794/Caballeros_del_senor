@@ -21,6 +21,14 @@ export interface AdaptadorNotificacion {
 export type AdaptadoresNotificacion = Partial<Record<CanalNotificacion, AdaptadorNotificacion>>;
 export const ADAPTADORES_NOTIFICACION = Symbol('ADAPTADORES_NOTIFICACION');
 
+/** Lo justo para encontrar la fila fallida en la base y en el log: ningún dato del cliente. */
+interface FilaFallida {
+  id: string;
+  clave: string;
+  canal: CanalNotificacion;
+  reservaId: string;
+}
+
 export interface DatosNotificacion {
   reservaId: string;
   clienteId: string;
@@ -91,7 +99,10 @@ export class NotificacionesService {
     if (!adaptador) return;
 
     if (!plantilla) {
-      await this.marcarFallida(fila.id, `No hay plantilla activa «${datos.clave}» para el canal ${datos.canal}`);
+      await this.marcarFallida(
+        { id: fila.id, clave: datos.clave, canal: datos.canal, reservaId: datos.reservaId },
+        `No hay plantilla activa «${datos.clave}» para el canal ${datos.canal}`,
+      );
       return;
     }
 
@@ -104,14 +115,31 @@ export class NotificacionesService {
     } catch (fallo) {
       // Sin credenciales (desarrollo) no es un fallo: la fila sigue pendiente.
       if (fallo instanceof ProveedorSinConfigurar) return;
-      await this.marcarFallida(fila.id, fallo instanceof Error ? fallo.message : String(fallo));
+      await this.marcarFallida(
+        { id: fila.id, clave: datos.clave, canal: datos.canal, reservaId: datos.reservaId },
+        fallo instanceof Error ? fallo.message : String(fallo),
+      );
     }
   }
 
-  private async marcarFallida(id: string, error: string): Promise<void> {
+  /**
+   * Marcar la fila `FALLIDA` no basta: nadie recoge todavía las filas
+   * `PENDIENTE` ni `FALLIDA`, así que una plantilla sin sembrar o un proveedor
+   * que rechaza el envío dejan al cliente sin su enlace de gestión —la única
+   * llave de su cita— y el sistema no se queja. El log a nivel `error` es hoy
+   * la única alarma, y por eso lleva los identificadores con los que se puede
+   * encontrar la fila (`notificacion.id` y `reservaId`).
+   *
+   * No se registra ni el destino ni el payload: llevan el correo del cliente y
+   * el enlace con el token.
+   */
+  private async marcarFallida(datos: FilaFallida, error: string): Promise<void> {
     await this.prisma.notificacion.update({
-      where: { id },
+      where: { id: datos.id },
       data: { estado: 'FALLIDA', error, intentos: 1 },
     });
+    this.logger.error(
+      `Notificación FALLIDA «${datos.clave}» (${datos.canal}) de la reserva ${datos.reservaId}: ${error}. Fila ${datos.id}; nadie reintenta las filas FALLIDA, así que el cliente no recibió este aviso.`,
+    );
   }
 }

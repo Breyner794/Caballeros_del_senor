@@ -40,15 +40,40 @@ describe('GuardTurnstile', () => {
     vi.restoreAllMocks();
   });
 
-  it('sin secreto configurado deja pasar, avisa en el log y no llama a Cloudflare', async () => {
-    // Misma convención que CorreoService: permite desarrollar y probar sin credenciales.
+  it('sin secreto configurado deja pasar, en silencio, y no llama a Cloudflare', async () => {
+    // Misma convención que CorreoService: permite desarrollar y probar sin
+    // credenciales. El aviso no va por petición: eso es ruido que nadie lee.
     const aviso = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => undefined);
+    const alarma = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
     const guardSinSecreto = new GuardTurnstile(configuracion(undefined));
 
     await expect(guardSinSecreto.canActivate(contexto())).resolves.toBe(true);
+    await expect(guardSinSecreto.canActivate(contexto())).resolves.toBe(true);
 
-    expect(aviso).toHaveBeenCalledOnce();
+    expect(aviso).not.toHaveBeenCalled();
+    expect(alarma).not.toHaveBeenCalled();
     expect(fetchDoble).not.toHaveBeenCalled();
+  });
+
+  it('al arrancar sin secreto grita UNA VEZ con nivel error', async () => {
+    // Es uno de los dos únicos caminos por los que el canal público puede
+    // quedar roto sin que nadie se entere: si alguien despliega sin la
+    // variable, la web levanta SIN CAPTCHA. El aviso tiene que doler.
+    const alarma = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    new GuardTurnstile(configuracion(undefined)).onModuleInit();
+
+    expect(alarma).toHaveBeenCalledOnce();
+    expect(alarma.mock.calls[0]![0]).toContain('TURNSTILE_SECRET_KEY');
+    expect(alarma.mock.calls[0]![0]).toContain('SIN CAPTCHA');
+  });
+
+  it('al arrancar con secreto no dice nada', () => {
+    const alarma = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+
+    new GuardTurnstile(configuracion('secreto-de-prueba')).onModuleInit();
+
+    expect(alarma).not.toHaveBeenCalled();
   });
 
   it('deja pasar cuando Cloudflare responde success', async () => {

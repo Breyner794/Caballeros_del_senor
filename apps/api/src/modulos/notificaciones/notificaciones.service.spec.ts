@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { Logger } from '@nestjs/common';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { crearPrismaDoble } from '../../../test/soporte/dobles.js';
 import { AdaptadorEmail } from './adaptador-email.js';
 import { ProveedorSinConfigurar } from './correo.service.js';
@@ -35,6 +36,8 @@ describe('NotificacionesService.encolar', () => {
     email = { enviar: vi.fn(async () => ({ idExterno: '<msg-1@brevo>' })) };
     servicio = new NotificacionesService(prisma as never, { EMAIL: email as AdaptadorNotificacion });
   });
+
+  afterEach(() => vi.restoreAllMocks());
 
   it('registra la notificación como PENDIENTE antes de intentar enviarla', async () => {
     const orden: string[] = [];
@@ -98,6 +101,34 @@ describe('NotificacionesService.encolar', () => {
         error: 'Brevo respondió 400: sender inválido',
       }),
     });
+  });
+
+  it('una notificación FALLIDA grita en el log, con los identificadores y sin el enlace', async () => {
+    // Nadie recoge todavía las filas FALLIDA: sin esta línea, un cliente se
+    // queda sin su enlace de gestión y el sistema no se queja. Y el mensaje no
+    // puede llevar ni el destino ni el enlace, que trae el token de la cita.
+    const alarma = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    email.enviar.mockRejectedValue(new Error('Brevo respondió 400: sender inválido'));
+
+    await servicio.encolar(DATOS);
+
+    expect(alarma).toHaveBeenCalledOnce();
+    const mensaje = String(alarma.mock.calls[0]![0]);
+    expect(mensaje).toContain('reserva.confirmada');
+    expect(mensaje).toContain('reserva-1');
+    expect(mensaje).toContain('notif-1');
+    expect(mensaje).not.toContain('tok_secreto');
+    expect(mensaje).not.toContain('juan@correo.co');
+  });
+
+  it('sin plantilla activa también grita: es el fallo que deja al cliente sin enlace', async () => {
+    const alarma = vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined);
+    prisma.plantillaNotificacion.findFirst.mockResolvedValue(null);
+
+    await servicio.encolar(DATOS);
+
+    expect(alarma).toHaveBeenCalledOnce();
+    expect(String(alarma.mock.calls[0]![0])).toContain('No hay plantilla activa');
   });
 
   it('no lanza si el proveedor falla: el correo es una comodidad, no el recibo', async () => {
