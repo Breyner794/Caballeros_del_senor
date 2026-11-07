@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "skills": {
+    "api-security-testing": {
+      "source": "usestrix/strix",
+      "sourceType": "github",
+      "skillPath": "skills/api-security-testing/SKILL.md",
+      "computedHash": "2cda580144136513c89ccca81b15481a1a5b0f7ffd0fe390d61a0ef40006bd0e"
+    },
+    "dart-run-static-analysis": {
+      "source": "dart-lang/skills",
+      "sourceType": "github",
+      "skillPath": "skills/dart-run-static-analysis/SKILL.md",
+      "computedHash": "7b143ff93bfb118ce9d72fca56cef4b38d75bfe9044367101db09cf32e6815ad"
+    },
+    "e2e-testing": {
+      "source": "affaan-m/ecc",
+      "sourceType": "github",
+      "skillPath": "skills/e2e-testing/SKILL.md",
+      "computedHash": "ae1a9cb885532edccb80682df28f269ada8bda86deedd00b282a82b03e011b2e"
+    }
+  }
+}
