@@ -1326,9 +1326,35 @@ describe('DisponibilidadService.calendario con servicio, reglas del cliente y ba
     );
 
     expect(dia!.reservas).toBe(1);
-    // 20 inicios: 1 por la cita y 2 por el almuerzo no se ofrecen.
-    expect(dia!.totalHuecos).toBe(20);
+    // La jornada tiene 20 inicios, pero el almuerzo tapa 2: no son capacidad
+    // del día (el modo normal también se los quita con `restarBloques`), así
+    // que `totalHuecos` son 18 y el único ocupado es la cita.
+    expect(dia!.totalHuecos).toBe(18);
     expect(dia!.huecosLibres).toBe(17);
+  });
+
+  it('en modo exacto `totalHuecos` es la misma capacidad que en el modo normal', async () => {
+    // El mismo día y el mismo almuerzo por los dos caminos: sin servicio
+    // elegido (modo normal) y con servicio elegido (modo exacto). Si los dos
+    // contadores no coinciden, `totalHuecos` significa dos cosas según el
+    // flag y `estado` sale de una proporción con otro denominador — la trampa
+    // que la decisión R20 arregló para `reservas`.
+    const conAlmuerzo = { agendas: [agendaDia({ bloques: [{ horaInicio: 720, horaFin: 780, tipo: 'ALMUERZO' }] })] };
+
+    const normal = montar();
+    escenario(normal, conAlmuerzo);
+    const [diaNormal] = await normal.servicio.calendario(rangoDe(OTRO_MARTES));
+
+    const exacto = montar();
+    escenario(exacto, conAlmuerzo);
+    const [diaExacto] = await exacto.servicio.calendario(
+      rangoDe(OTRO_MARTES, { servicioIds: [ID.servicioCorte] }),
+    );
+
+    // Jornada de 8 a 18 con slot de 30: 20 inicios menos los 2 del almuerzo.
+    expect(diaNormal!.totalHuecos).toBe(18);
+    expect(diaExacto!.totalHuecos).toBe(diaNormal!.totalHuecos);
+    expect(diaExacto!.estado).toBe(diaNormal!.estado);
   });
 
   it('el mismo día sí tiene hueco para un servicio que cabe', async () => {

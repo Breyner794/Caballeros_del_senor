@@ -633,7 +633,29 @@ export class DisponibilidadService {
             jornada,
             ocupaciones.map((o) => ({ horaInicio: o.horaInicio, horaFin: o.horaFin })),
           );
+          /**
+           * Almuerzos y descansos NO son capacidad del día, y por eso no entran
+           * en `totalHuecos`: el modo normal se los quita con `restarBloques`
+           * antes de contar inicios, y el modo exacto tiene que contar la misma
+           * cosa. Si no, `totalHuecos` significa dos cosas según el flag
+           * `exacto` —la trampa que la decisión R20 arregló para `reservas` y
+           * dejó viva en sus dos campos vecinos— y `estado` sale de una
+           * proporción con un denominador distinto en cada modo.
+           *
+           * `huecosLibres` no se mueve: un inicio que choca con un bloque ya
+           * sumaba en `totalHuecos` y en `huecosOcupados` a la vez, así que
+           * quitarlo de los dos deja la resta igual. El contraste se mide
+           * contra la misma ventana que usa `motivoDelInicio`, para que no
+           * exista un inicio descartado aquí que allí saliera libre.
+           */
+          const bloquesDelDia = ocupaciones.filter((o) => o.motivo !== 'OCUPADO');
+          const tapadoPorBloque = (inicio: number): boolean =>
+            bloquesDelDia.some((bloque) =>
+              seSolapan(bloque, { horaInicio: inicio, horaFin: inicio + duracionNecesaria }),
+            );
+
           for (const inicio of generarInicios(jornada, paso, paso)) {
+            if (tapadoPorBloque(inicio)) continue;
             totalHuecos += 1;
             const motivo = this.motivoDelInicio({
               inicio,
