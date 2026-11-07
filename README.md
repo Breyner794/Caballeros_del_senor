@@ -168,7 +168,8 @@ openssl rand -base64 48
 
 ```bash
 pnpm db:migrate     # desarrollo (prisma migrate dev)
-prisma migrate deploy  # producción: aplica lo pendiente y nunca borra datos
+pnpm --filter @cds/api prisma:deploy  # producción fuera del contenedor
+                                      # (la imagen ya las aplica al arrancar)
 pnpm db:seed        # idempotente: usa `upsert` y NO reactiva lo que el dueño desactivó
 ```
 

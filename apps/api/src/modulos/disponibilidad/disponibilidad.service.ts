@@ -636,11 +636,17 @@ export class DisponibilidadService {
           /**
            * Almuerzos y descansos NO son capacidad del día, y por eso no entran
            * en `totalHuecos`: el modo normal se los quita con `restarBloques`
-           * antes de contar inicios, y el modo exacto tiene que contar la misma
-           * cosa. Si no, `totalHuecos` significa dos cosas según el flag
+           * antes de contar inicios, y el modo exacto tiene que descontarlos
+           * igual. Si no, `totalHuecos` significa dos cosas según el flag
            * `exacto` —la trampa que la decisión R20 arregló para `reservas` y
            * dejó viva en sus dos campos vecinos— y `estado` sale de una
            * proporción con un denominador distinto en cada modo.
+           *
+           * Descontarlos no vuelve los dos modos idénticos, y no pretende
+           * serlo: coinciden mientras la duración necesaria no pase del paso,
+           * y cuando sí lo pasa el exacto cuenta menos a propósito, porque un
+           * inicio desde el que este servicio no cabe no es capacidad para
+           * él. Lo que se arregla aquí es el denominador, no la fórmula.
            *
            * `huecosLibres` no se mueve: un inicio que choca con un bloque ya
            * sumaba en `totalHuecos` y en `huecosOcupados` a la vez, así que
