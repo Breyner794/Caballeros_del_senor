@@ -18,7 +18,8 @@
     "db:seed": "pnpm --filter @cds/api prisma:seed",
     "db:studio": "pnpm --filter @cds/api prisma:studio",
     "dev:api": "pnpm --filter @cds/api dev",
-    "dev:panel": "pnpm --filter @cds/panel dev"
+    "dev:panel": "pnpm --filter @cds/panel dev",
+    "dev:booking": "pnpm --filter @cds/booking dev"
   },
   "devDependencies": {
     "prettier": "^3.4.2",
