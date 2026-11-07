@@ -28,6 +28,39 @@ const OPCIONES_ARGON: argon2.Options = {
 /** Contraseña común para los usuarios de ejemplo. Se cambia al primer acceso. */
 const PASSWORD_DEMO = 'Barberia2026!';
 
+/**
+ * Con SEED_DEMO=false se siembra solo lo que el sistema necesita para
+ * funcionar (configuración global, plantillas de notificación, festivos,
+ * comisión por defecto, cliente genérico y categorías) más una sede y el
+ * administrador. Quedan fuera las tres sedes de Bogotá, los servicios con
+ * precios inventados, los cinco usuarios de ejemplo y sus agendas.
+ *
+ * Importa porque las sedes no se pueden borrar desde el panel, solo
+ * desactivar: sembrar la demo en una barbería real deja sedes fantasma para
+ * siempre.
+ */
+const SEMBRAR_DEMO = (process.env.SEED_DEMO ?? 'true').trim().toLowerCase() !== 'false';
+
+const ADMIN_EMAIL = process.env.ADMIN_EMAIL?.trim() || 'admin@caballerosdelsenor.com';
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD?.trim() || PASSWORD_DEMO;
+const SEDE_NOMBRE = process.env.SEDE_NOMBRE?.trim() || 'Sede principal';
+
+// En modo limpio no se tolera el correo ni la contraseña de ejemplo: esa
+// contraseña está escrita en este archivo, que es público, y ese dominio no
+// existe. Igual que la validación de entorno de la API, es preferible no
+// arrancar a arrancar con una puerta abierta.
+if (!SEMBRAR_DEMO) {
+  const faltan: string[] = [];
+  if (!process.env.ADMIN_EMAIL?.trim()) faltan.push('ADMIN_EMAIL');
+  if (!process.env.ADMIN_PASSWORD?.trim()) faltan.push('ADMIN_PASSWORD');
+  if (faltan.length > 0) {
+    console.error(
+      `\nCon SEED_DEMO=false hacen falta estas variables: ${faltan.join(', ')}\n`,
+    );
+    process.exit(1);
+  }
+}
+
 const hora = (h: number, m = 0) => h * 60 + m;
 
 function aSlug(texto: string): string {
@@ -43,7 +76,19 @@ async function main() {
   console.log('Sembrando datos iniciales…\n');
 
   // ------------------------------------------------------------------ SEDES
-  const sedesDefinicion = [
+  // En modo limpio, una sola sede a medio rellenar: el panel permite editarla
+  // pero no borrarla, así que cuantas menos se creen, mejor.
+  const sedesDefinicion = !SEMBRAR_DEMO
+    ? [
+        {
+          nombre: SEDE_NOMBRE,
+          direccion: 'Pendiente de completar',
+          ciudad: undefined,
+          telefono: undefined,
+          orden: 1,
+        },
+      ]
+    : [
     {
       nombre: 'Caballeros del Señor — Centro',
       direccion: 'Calle 45 # 12-30, Centro',
@@ -97,7 +142,10 @@ async function main() {
   }
 
   const [centro, norte, sur] = sedes;
-  if (!centro || !norte || !sur) throw new Error('No se pudieron crear las sedes');
+  if (!centro) throw new Error('No se pudo crear la sede inicial');
+  if (SEMBRAR_DEMO && (!norte || !sur)) {
+    throw new Error('No se pudieron crear las sedes de demostración');
+  }
 
   // ------------------------------------------------------- CONFIGURACIÓN
   await prisma.configuracionGlobal.upsert({
@@ -176,7 +224,9 @@ async function main() {
   console.log(`  ${festivos.length} días festivos cargados`);
 
   // ------------------------------------------------------------- SERVICIOS
-  const serviciosDefinicion = [
+  // Los precios de abajo son inventados: en modo limpio no se siembra ninguno
+  // y el catálogo se da de alta desde el panel.
+  const serviciosDefinicion = !SEMBRAR_DEMO ? [] : [
     {
       nombre: 'Corte clásico',
       descripcion: 'Corte a tijera y máquina, acabado a navaja.',
@@ -245,12 +295,12 @@ async function main() {
     });
     servicios.push(servicio);
   }
-  console.log(`  ${servicios.length} servicios`);
+  if (servicios.length > 0) console.log(`  ${servicios.length} servicios`);
 
   // -------------------------------------------------------------- USUARIOS
-  const passwordHash = await argon2.hash(PASSWORD_DEMO, OPCIONES_ARGON);
+  const passwordHash = await argon2.hash(ADMIN_PASSWORD, OPCIONES_ARGON);
 
-  const usuariosDefinicion: {
+  type DefUsuario = {
     nombre: string;
     apellido: string;
     email: string;
@@ -260,62 +310,72 @@ async function main() {
     sedesExtra?: string[];
     alias?: string;
     slotMinutos?: number;
-  }[] = [
+  };
+
+  // El administrador se crea siempre; su correo sale de ADMIN_EMAIL.
+  const usuariosDefinicion: DefUsuario[] = [
     {
       nombre: 'Jhoan',
       apellido: 'Quilindo',
-      email: 'admin@caballerosdelsenor.com',
+      email: ADMIN_EMAIL,
       telefono: '+573001112233',
       rol: 'ADMIN',
     },
-    {
-      nombre: 'Laura',
-      apellido: 'Restrepo',
-      email: 'recepcion@caballerosdelsenor.com',
-      telefono: '+573002223344',
-      rol: 'RECEPCIONISTA',
-      sedeId: centro.id,
-      sedesExtra: [norte.id, sur.id],
-    },
-    {
-      nombre: 'Andrés',
-      apellido: 'Gómez',
-      email: 'andres@caballerosdelsenor.com',
-      telefono: '+573003334455',
-      rol: 'BARBERO',
-      sedeId: centro.id,
-      alias: 'El Maestro',
-      // Este barbero trabaja con slots de 30 min (hereda el global).
-    },
-    {
-      nombre: 'Camilo',
-      apellido: 'Ortiz',
-      email: 'camilo@caballerosdelsenor.com',
-      telefono: '+573004445566',
-      rol: 'BARBERO',
-      sedeId: norte.id,
-      sedesExtra: [centro.id],
-      alias: 'Cami',
-      // Configuró el suyo: un cambio del slot global ya no le afecta.
-      slotMinutos: 20,
-    },
-    {
-      nombre: 'Jeison',
-      apellido: 'Mosquera',
-      email: 'jeison@caballerosdelsenor.com',
-      telefono: '+573005556677',
-      rol: 'BARBERO',
-      sedeId: sur.id,
-      alias: 'Jei',
-    },
-    {
-      nombre: 'Marta',
-      apellido: 'Lozano',
-      email: 'contador@caballerosdelsenor.com',
-      telefono: '+573006667788',
-      rol: 'CONTADOR',
-    },
   ];
+
+  // Los cinco de ejemplo solo en modo demo: dos de ellos viven en las sedes
+  // norte y sur, que en una base limpia no existen.
+  if (SEMBRAR_DEMO && norte && sur) {
+    usuariosDefinicion.push(
+      {
+        nombre: 'Laura',
+        apellido: 'Restrepo',
+        email: 'recepcion@caballerosdelsenor.com',
+        telefono: '+573002223344',
+        rol: 'RECEPCIONISTA',
+        sedeId: centro.id,
+        sedesExtra: [norte.id, sur.id],
+      },
+      {
+        nombre: 'Andrés',
+        apellido: 'Gómez',
+        email: 'andres@caballerosdelsenor.com',
+        telefono: '+573003334455',
+        rol: 'BARBERO',
+        sedeId: centro.id,
+        alias: 'El Maestro',
+        // Este barbero trabaja con slots de 30 min (hereda el global).
+      },
+      {
+        nombre: 'Camilo',
+        apellido: 'Ortiz',
+        email: 'camilo@caballerosdelsenor.com',
+        telefono: '+573004445566',
+        rol: 'BARBERO',
+        sedeId: norte.id,
+        sedesExtra: [centro.id],
+        alias: 'Cami',
+        // Configuró el suyo: un cambio del slot global ya no le afecta.
+        slotMinutos: 20,
+      },
+      {
+        nombre: 'Jeison',
+        apellido: 'Mosquera',
+        email: 'jeison@caballerosdelsenor.com',
+        telefono: '+573005556677',
+        rol: 'BARBERO',
+        sedeId: sur.id,
+        alias: 'Jei',
+      },
+      {
+        nombre: 'Marta',
+        apellido: 'Lozano',
+        email: 'contador@caballerosdelsenor.com',
+        telefono: '+573006667788',
+        rol: 'CONTADOR',
+      },
+    );
+  }
 
   const usuarios = [];
   for (const def of usuariosDefinicion) {
@@ -486,9 +546,15 @@ async function main() {
   console.log(`  ${plantillas.length} plantillas de notificación`);
 
   console.log('\nListo.\n');
-  console.log('Puedes entrar al panel con cualquiera de estos correos:');
+  console.log('Puedes entrar al panel con:');
   for (const u of usuarios) console.log(`  ${u.email.padEnd(40)} ${u.rol}`);
-  console.log(`\nContraseña para todos: ${PASSWORD_DEMO}`);
+  if (SEMBRAR_DEMO) {
+    console.log(`\nContraseña para todos: ${PASSWORD_DEMO}`);
+  } else {
+    console.log('\nContraseña: la que pasaste en ADMIN_PASSWORD.');
+    console.log(`Sede «${SEDE_NOMBRE}» creada sin dirección: complétala en el panel.`);
+    console.log('Sin servicios ni barberos: dalos de alta desde el panel.');
+  }
   console.log('(El panel obliga a cambiarla en el primer acceso.)\n');
 }
 
