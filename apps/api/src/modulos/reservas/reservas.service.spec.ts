@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { CODIGOS_ERROR, type CrearReservaDto, type CrearWalkInDto } from '@cds/shared';
 import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';
 import { ReservasService } from './reservas.service.js';
+import { ClientesService } from '../clientes/clientes.service.js';
 import {
   AHORA,
   FECHA,
@@ -196,6 +197,21 @@ describe('ReservasService.crear', () => {
     });
     expect(escritura.data['confirmadaEn']).toBeInstanceOf(Date);
     expect(entorno.auditoria.registrar).toHaveBeenCalledTimes(1);
+  });
+
+  it('un interbloqueo al escribir (la carrera por el mismo hueco) se traduce a RESERVA_SOLAPADA', async () => {
+    const entorno = montar();
+    prepararCreacionFeliz(entorno);
+    entorno.prisma.reserva.create.mockRejectedValue(
+      new Prisma.PrismaClientUnknownRequestError('PostgresError { code: "40P01", message: "deadlock detected" }', {
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(entorno.servicio.crear(datosCrear(), actorRecepcion())).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.RESERVA_SOLAPADA,
+      status: 409,
+    });
   });
 
   it('calcula fin, fin con buffer, subtotal y total a partir de los servicios', async () => {
@@ -1031,7 +1047,15 @@ describe('ReservasService.reprogramar', () => {
 
     expect(entorno.prisma.reserva.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: ID.reserva },
+        // La escritura exige que la fila siga como se leyó.
+        where: {
+          id: ID.reserva,
+          estado: 'CONFIRMADA',
+          inicioEn: expect.any(Date),
+          sedeId: ID.sede,
+          barberoId: ID.barbero,
+          tokenGestion: expect.anything(),
+        },
         data: {
           sedeId: ID.sede,
           barberoId: ID.barbero,
@@ -1041,6 +1065,22 @@ describe('ReservasService.reprogramar', () => {
         },
       }),
     );
+  });
+
+  it('si otra petición tocó la cita entre la lectura y la escritura, responde CONFLICTO sin auditar', async () => {
+    const entorno = montar();
+    prepararReprogramacion(entorno);
+    entorno.prisma.reserva.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Record to update not found', {
+        code: 'P2025',
+        clientVersion: 'test',
+      }),
+    );
+
+    await expect(
+      entorno.servicio.reprogramar(ID.reserva, { inicioEn: nuevaHora.toISOString(), notificar: true }, null, true),
+    ).rejects.toMatchObject({ codigo: CODIGOS_ERROR.CONFLICTO, status: 409 });
+    expect(entorno.auditoria.registrar).not.toHaveBeenCalled();
   });
 
   it('excluye la propia cita al validar el hueco', async () => {
@@ -1232,10 +1272,46 @@ describe('ReservasService.cancelar', () => {
           canceladaEn: AHORA,
           canceladaPor: 'PANEL',
           motivoCancelacion: 'El cliente avisó',
+          tokenGestion: null,
         },
       }),
     );
     expect(entorno.clientes.recalcularMetricas).toHaveBeenCalledWith(ID.cliente);
+  });
+
+  it('escribe solo si el estado sigue siendo el que leyó: la condición viaja en el where', async () => {
+    const entorno = montar();
+    prepararCancelacion(entorno, reserva({ estado: 'PENDIENTE' }));
+
+    await entorno.servicio.cancelar(ID.reserva, { notificar: true }, actorRecepcion());
+
+    expect(entorno.prisma.reserva.update).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: ID.reserva, estado: 'PENDIENTE' } }),
+    );
+  });
+
+  it('si otra petición la canceló entre la lectura y la escritura, responde ESTADO_RESERVA_INVALIDO', async () => {
+    const entorno = montar();
+    prepararCancelacion(entorno);
+    entorno.prisma.reserva.update.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError('Record to update not found', {
+        code: 'P2025',
+        clientVersion: 'test',
+      }),
+    );
+    // La relectura que informa del estado actual ya ve la cita cancelada.
+    entorno.prisma.reserva.findUnique
+      .mockResolvedValueOnce(reserva())
+      .mockResolvedValue({ estado: 'CANCELADA' });
+
+    await expect(
+      entorno.servicio.cancelar(ID.reserva, { notificar: true }, null, 'CLIENTE'),
+    ).rejects.toMatchObject({
+      codigo: CODIGOS_ERROR.ESTADO_RESERVA_INVALIDO,
+      detalle: { estadoActual: 'CANCELADA' },
+    });
+    expect(entorno.auditoria.registrar).not.toHaveBeenCalled();
+    expect(entorno.clientes.recalcularMetricas).not.toHaveBeenCalled();
   });
 
   it.each(['PENDIENTE', 'CONFIRMADA', 'EN_CURSO'])(
@@ -1832,5 +1908,273 @@ describe('ReservasService.completar', () => {
 
     expect(entorno.configuracion.zonaHoraria).toHaveBeenCalled();
     expect(ZONA).toBe('America/Bogota');
+  });
+});
+
+// ============================================================================
+//  CANAL PÚBLICO: ACTOR NULO, CORREO Y TOKEN DE GESTIÓN
+// ============================================================================
+
+describe('ReservasService: canal público (actor nulo, correo y token de gestión)', () => {
+  const nuevaHora = horaLocal(720, '2026-03-12');
+
+  function prepararCreacionWeb(entorno: Entorno): void {
+    barberoValido(entorno.prisma);
+    entorno.prisma.servicio.findMany.mockResolvedValue([servicio()]);
+    entorno.prisma.cliente.findUnique.mockResolvedValue(null);
+    entorno.clientes.crear.mockResolvedValue({ id: 'cliente-nuevo' });
+    entorno.prisma.reserva.count.mockResolvedValue(0);
+    entorno.prisma.reserva.create.mockResolvedValue({
+      id: ID.reserva,
+      codigo: 'CDS-A1B2',
+      estado: 'CONFIRMADA',
+    });
+    entorno.prisma.reserva.findUnique.mockResolvedValue(reserva());
+  }
+
+  const datosWeb = (email?: string) =>
+    datosCrear({
+      clienteId: undefined,
+      clienteNuevo: {
+        nombreCompleto: 'Juan P',
+        telefono: '+573001234567',
+        ...(email ? { email } : {}),
+      },
+    });
+
+  it('crea con actor nulo y audita sin usuario', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+
+    await entorno.servicio.crear(datosWeb(), null, true);
+
+    // Una fila de auditoría con usuario vacío dice la verdad; una con un usuario
+    // inventado miente. El canal WEB de la reserva explica quién la creó.
+    expect(entorno.auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ accion: 'CREAR', actor: null }),
+    );
+    const { data } = entorno.prisma.reserva.create.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data['creadoPorId']).toBeNull();
+    expect(data['canal']).toBe('WEB');
+  });
+
+  it('pasa el correo a la ficha nueva y marca aceptaEmail', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+
+    await entorno.servicio.crear(datosWeb('juan@ejemplo.com'), null, true);
+
+    expect(entorno.clientes.crear).toHaveBeenCalledWith(
+      expect.objectContaining({ email: 'juan@ejemplo.com', aceptaEmail: true }),
+      null,
+    );
+  });
+
+  it('sin correo no manda aceptaEmail: lo omite, no lo pone a false', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+
+    await entorno.servicio.crear(datosWeb(), null, true);
+
+    const [datos] = entorno.clientes.crear.mock.calls[0]! as [Record<string, unknown>];
+    expect(datos).not.toHaveProperty('aceptaEmail');
+  });
+
+  it('no degrada el consentimiento previo al reactivar una ficha cuando no hay correo', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+    const clientesReal = new ClientesService(
+      entorno.prisma as never,
+      entorno.auditoria as never,
+      entorno.configuracion as never,
+    );
+    entorno.clientes.crear.mockImplementation((datos: never, actor: never) =>
+      clientesReal.crear(datos, actor),
+    );
+    // La ficha eliminada había consentido recibir correo.
+    entorno.prisma.cliente.findUnique.mockResolvedValue({
+      id: ID.cliente,
+      nombreCompleto: 'Juan P',
+      eliminadoEn: new Date('2026-01-01T00:00:00Z'),
+      aceptaEmail: true,
+    });
+    entorno.prisma.cliente.update.mockResolvedValue({ id: ID.cliente });
+
+    await entorno.servicio.crear(datosWeb(), null, true);
+
+    const { data } = entorno.prisma.cliente.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).not.toHaveProperty('aceptaEmail');
+  });
+
+  it('no restaura el consentimiento de WhatsApp que el cliente retiró al reactivar su ficha', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+    const clientesReal = new ClientesService(
+      entorno.prisma as never,
+      entorno.auditoria as never,
+      entorno.configuracion as never,
+    );
+    entorno.clientes.crear.mockImplementation((datos: never, actor: never) =>
+      clientesReal.crear(datos, actor),
+    );
+    // La ficha eliminada había pedido no recibir mensajes por WhatsApp.
+    entorno.prisma.cliente.findUnique.mockResolvedValue({
+      id: ID.cliente,
+      nombreCompleto: 'Juan P',
+      eliminadoEn: new Date('2026-01-01T00:00:00Z'),
+      aceptaWhatsapp: false,
+    });
+    entorno.prisma.cliente.update.mockResolvedValue({ id: ID.cliente });
+
+    await entorno.servicio.crear(datosWeb(), null, true);
+
+    const { data } = entorno.prisma.cliente.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).not.toHaveProperty('aceptaWhatsapp');
+  });
+
+  it('reutiliza y reactiva la ficha de un teléfono eliminado sin borrarle las notas', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+    // El servicio de clientes es el real: lo que se fija es lo que acaba
+    // escribiéndose en la ficha, no lo que el doble prometa.
+    const clientesReal = new ClientesService(
+      entorno.prisma as never,
+      entorno.auditoria as never,
+      entorno.configuracion as never,
+    );
+    entorno.clientes.crear.mockImplementation((datos: never, actor: never) =>
+      clientesReal.crear(datos, actor),
+    );
+    entorno.prisma.cliente.findUnique.mockResolvedValue({
+      id: ID.cliente,
+      nombreCompleto: 'Juan P',
+      eliminadoEn: new Date('2026-01-01T00:00:00Z'),
+    });
+    entorno.prisma.cliente.update.mockResolvedValue({ id: ID.cliente });
+
+    await entorno.servicio.crear(datosWeb('juan@ejemplo.com'), null, true);
+
+    expect(entorno.prisma.cliente.create).not.toHaveBeenCalled();
+    const { where, data } = entorno.prisma.cliente.update.mock.calls[0]![0] as {
+      where: { id: string };
+      data: Record<string, unknown>;
+    };
+    expect(where).toEqual({ id: ID.cliente });
+    expect(data['eliminadoEn']).toBeNull();
+    expect(data['activo']).toBe(true);
+    // Prisma ignora `undefined`: la clave puede viajar, pero nunca con un valor
+    // ('' o null) que pise las notas que la ficha ya tenía.
+    expect(data).not.toHaveProperty('notas');
+    const { data: reservaData } = entorno.prisma.reserva.create.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(reservaData['clienteId']).toBe(ID.cliente);
+  });
+
+  it('desde el panel guarda el correo pero no marca aceptaEmail', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+
+    // Tener el dato no es tener permiso para usarlo: lo escribe recepción, no
+    // el cliente, así que nadie ha consentido nada.
+    await entorno.servicio.crear(datosWeb('juan@ejemplo.com'), actorRecepcion());
+
+    const [datos] = entorno.clientes.crear.mock.calls[0]! as [Record<string, unknown>];
+    expect(datos).toMatchObject({ email: 'juan@ejemplo.com' });
+    expect(datos).not.toHaveProperty('aceptaEmail');
+  });
+
+  it('desde el panel no puede crear una cita sin actor', async () => {
+    const entorno = montar();
+    prepararCreacionWeb(entorno);
+
+    await expect(entorno.servicio.crear(datosWeb(), null)).rejects.toThrow();
+
+    // Una cita del panel sin autor sería un agujero de auditoría silencioso.
+    expect(entorno.prisma.reserva.create).not.toHaveBeenCalled();
+    expect(entorno.clientes.crear).not.toHaveBeenCalled();
+    expect(entorno.auditoria.registrar).not.toHaveBeenCalled();
+  });
+
+  it('desde el panel no puede reprogramar sin actor', async () => {
+    const entorno = montar();
+    entorno.prisma.reserva.findUnique.mockResolvedValue(reserva());
+    barberoValido(entorno.prisma);
+
+    await expect(
+      entorno.servicio.reprogramar(
+        ID.reserva,
+        { inicioEn: nuevaHora.toISOString(), notificar: true },
+        null,
+      ),
+    ).rejects.toThrow();
+    expect(entorno.prisma.reserva.update).not.toHaveBeenCalled();
+  });
+
+  it('invalida el token de gestión al cancelar', async () => {
+    const entorno = montar();
+    entorno.prisma.reserva.findUnique.mockResolvedValue(reserva());
+    entorno.prisma.reserva.update.mockResolvedValue(reserva({ estado: 'CANCELADA' }));
+
+    await entorno.servicio.cancelar(ID.reserva, { notificar: true }, null, 'CLIENTE');
+
+    expect(entorno.prisma.reserva.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ tokenGestion: null }) }),
+    );
+    expect(entorno.auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ accion: 'CANCELAR_RESERVA', actor: null }),
+    );
+  });
+
+  it('rota el token de gestión al reprogramar y devuelve el nuevo', async () => {
+    const entorno = montar();
+    entorno.prisma.reserva.findUnique.mockResolvedValue(reserva({ tokenGestion: 'token-viejo' }));
+    barberoValido(entorno.prisma);
+    // El doble de `update` devuelve lo que se le escribió, como la base real.
+    entorno.prisma.reserva.update.mockImplementation(
+      async ({ data }: { data: Record<string, unknown> }) => ({ ...reserva(), ...data }),
+    );
+
+    const resultado = await entorno.servicio.reprogramar(
+      ID.reserva,
+      { inicioEn: nuevaHora.toISOString(), notificar: true },
+      null,
+      true,
+    );
+
+    // El enlace viejo pudo quedar en un correo o en un historial de WhatsApp.
+    const { data } = entorno.prisma.reserva.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data['tokenGestion']).toEqual(expect.any(String));
+    expect(data['tokenGestion']).not.toBe('token-viejo');
+    expect(resultado.tokenGestion).toBe(data['tokenGestion']);
+    expect(entorno.auditoria.registrar).toHaveBeenCalledWith(
+      expect.objectContaining({ accion: 'REPROGRAMAR_RESERVA', actor: null }),
+    );
+  });
+
+  it('no rota el token cuando reprograma el panel', async () => {
+    const entorno = montar();
+    entorno.prisma.reserva.findUnique.mockResolvedValue(reserva());
+    barberoValido(entorno.prisma);
+    entorno.prisma.reserva.update.mockResolvedValue(reserva({ inicioEn: nuevaHora }));
+
+    await entorno.servicio.reprogramar(
+      ID.reserva,
+      { inicioEn: nuevaHora.toISOString(), notificar: true },
+      actorRecepcion(),
+    );
+
+    const { data } = entorno.prisma.reserva.update.mock.calls[0]![0] as {
+      data: Record<string, unknown>;
+    };
+    expect(data).not.toHaveProperty('tokenGestion');
   });
 });

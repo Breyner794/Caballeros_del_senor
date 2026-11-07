@@ -14,13 +14,17 @@ pnpm db:migrate
 pnpm db:seed
 ```
 
-Arrancar todo (API + panel):
+Arrancar todo (API + panel + web pública):
 
 ```bash
-pnpm dev
+pnpm dev          # las tres a la vez
+pnpm dev:api      # solo la API
+pnpm dev:panel    # solo el panel
+pnpm dev:booking  # solo la web pública de reservas
 ```
 
 - Panel administrativo: http://localhost:5173
+- Web pública de reservas: http://localhost:5174 (puerto fijo: `BOOKING_ORIGIN` y el CORS de la API lo esperan ahí)
 - API: http://localhost:3001/api/v1
 - Documentación (solo fuera de producción): http://localhost:3001/api/v1/docs
 - Salud: `/api/v1/salud` (proceso vivo) y `/api/v1/salud/listo` (incluye base de datos)
@@ -44,8 +48,8 @@ primer acceso.
 ```
 apps/
   api/        NestJS + Prisma + PostgreSQL
-  panel/      Panel administrativo (React + Vite + shadcn)
-  booking/    Web pública del cliente
+  panel/      Panel administrativo (React + Vite + shadcn), puerto 5173
+  booking/    Web pública de reservas del cliente final (React + Vite), puerto 5174
 packages/
   shared/     Tipos, esquemas Zod y reglas de dominio compartidas
 infra/
@@ -146,3 +150,53 @@ Genera los secretos así:
 ```bash
 openssl rand -base64 48
 ```
+
+### En orden, lo que hay que hacer en cada despliegue
+
+**1. Variables de entorno.** Además de las que ya pide `.env.example`
+(`DATABASE_URL`, `REDIS_URL`, los dos secretos JWT, `ENCRYPTION_KEY`,
+`BREVO_*`), la web pública de reservas necesita estas cuatro:
+
+| Variable | Dónde | Si falta |
+| --- | --- | --- |
+| `TURNSTILE_SECRET_KEY` | API | En producción la API **no arranca** (y así debe ser: sin ella el canal público quedaría sin captcha). Fuera de producción el canal levanta sin captcha y lo avisa una vez, con nivel `error`, al arrancar. |
+| `BOOKING_ORIGIN` | API | El CORS rechaza al navegador del cliente y el enlace de gestión del correo se construye contra `http://localhost:5174`. Es el origen público de la web (`https://reservas.tudominio.com`). |
+| `VITE_API_URL` | Web (en **build**) | Cae al valor de desarrollo (`http://localhost:3001/api/v1`) y la web no carga nada. Es una variable de compilación: cambiarla exige reconstruir, no reiniciar. **Dejarla creada pero vacía cuenta como no configurada.** |
+| `VITE_TURNSTILE_SITE_KEY` | Web (en **build**) | El widget del captcha no se pinta y ninguna reserva se puede enviar, porque la API exige el token. |
+
+**2. Migraciones y siembra.**
+
+```bash
+pnpm db:migrate     # desarrollo (prisma migrate dev)
+pnpm --filter @cds/api prisma:deploy  # producción fuera del contenedor
+                                      # (la imagen ya las aplica al arrancar)
+pnpm db:seed        # idempotente: usa `upsert` y NO reactiva lo que el dueño desactivó
+```
+
+La siembra es obligatoria, no opcional: **las plantillas de notificación solo
+las crea el seed**. Sin ellas, la cita se guarda bien y el correo no sale —
+`NotificacionesService` deja la fila `FALLIDA`, hoy nadie reintenta esas filas,
+y el cliente se queda sin el enlace de gestión, que es la única llave de su
+cita. El único rastro es una línea `error` en el log de la API.
+
+> **Cuidado con `prisma migrate dev` sobre una base con datos.** `migrate diff`
+> no conoce `clientes_telefono_trgm_idx`: ese índice lo crea con SQL en crudo la
+> migración `20261011190000_reglas_negocio_sql` y `schema.prisma` no lo declara,
+> así que Prisma propone **eliminarlo** en cada diff. Quien acepte el diff
+> propuesto borra el índice y la búsqueda de clientes por teléfono en el panel
+> se degrada en silencio: sigue funcionando, cada vez más lenta. En producción
+> se usa `prisma migrate deploy`, que no propone diffs.
+
+**3. El *fallback* de SPA del host estático.** `/cita#<token>` es una ruta de
+cliente, no un archivo: el servidor tiene que reescribir cualquier ruta
+desconocida a `index.html`. **En un host estático sin esa reescritura, abrir el
+enlace de la cita devuelve 404** — y ese enlace es la única llave de la cita y
+lo que va en el correo del cliente. En desarrollo funciona porque lo resuelve
+Vite, así que el fallo aparecería solo en producción y solo para quien abra su
+correo: es la trampa menos evidente de toda la entrega. En Nginx es
+`try_files $uri /index.html;`; en Netlify, Vercel, Cloudflare Pages o S3 +
+CloudFront, la regla equivalente de «SPA fallback».
+
+El token viaja en el **fragmento**, que el navegador no manda al servidor: la
+reescritura no lo ve ni lo registra, y eso sigue siendo cierto con el fallback
+puesto.

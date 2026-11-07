@@ -304,7 +304,13 @@ export class ClientesService {
     return { datos: reservas, meta: construirMeta(total, meta.pagina, meta.limite) };
   }
 
-  async crear(datos: CrearClienteDto, actor?: UsuarioAutenticado | null): Promise<Cliente> {
+  async crear(
+    // Los consentimientos son opcionales a propósito: el canal público los omite
+    // para no pisar, al reactivar una ficha, lo que el cliente ya había decidido.
+    datos: Omit<CrearClienteDto, 'aceptaEmail' | 'aceptaWhatsapp'> &
+      Partial<Pick<CrearClienteDto, 'aceptaEmail' | 'aceptaWhatsapp'>>,
+    actor?: UsuarioAutenticado | null,
+  ): Promise<Cliente> {
     const existente = await this.prisma.cliente.findUnique({
       where: { telefono: datos.telefono },
       select: { id: true, nombreCompleto: true, eliminadoEn: true },

@@ -47,6 +47,9 @@ export const entornoSchema = z
     WHATSAPP_ACCESS_TOKEN: z.string().optional(),
     WHATSAPP_VERIFY_TOKEN: z.string().optional(),
     WHATSAPP_APP_SECRET: z.string().optional(),
+
+    /** Secreto de Cloudflare Turnstile (captcha del canal público). */
+    TURNSTILE_SECRET_KEY: z.string().optional(),
   })
   .superRefine((valor, ctx) => {
     // En desarrollo se tolera un secreto corto para no estorbar; en producción
@@ -70,6 +73,16 @@ export const entornoSchema = z
         path: ['JWT_REFRESH_SECRET'],
         message:
           'El secreto de refresh debe ser distinto al de acceso: si no, un access token robado sirve para refrescar',
+      });
+    }
+
+    // En desarrollo el guard deja pasar sin clave; en producción sería una
+    // puerta abierta a los bots, así que la API no arranca sin ella.
+    if (!valor.TURNSTILE_SECRET_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['TURNSTILE_SECRET_KEY'],
+        message: 'Falta TURNSTILE_SECRET_KEY: sin ella el canal público queda sin captcha',
       });
     }
 

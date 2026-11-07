@@ -1,13 +1,30 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 
-interface EnvioCorreo {
+export interface EnvioCorreo {
   para: string;
   nombreDestinatario?: string;
   asunto: string;
   html: string;
   texto?: string;
 }
+
+/**
+ * El proveedor no tiene credenciales: no es un fallo, es un entorno sin
+ * configurar. Los adaptadores de notificación lo lanzan para que el servicio
+ * deje la fila `PENDIENTE` en lugar de marcarla `FALLIDA`.
+ */
+export class ProveedorSinConfigurar extends Error {
+  constructor(proveedor: string) {
+    super(`${proveedor} no está configurado`);
+    this.name = 'ProveedorSinConfigurar';
+  }
+}
+
+export type ResultadoEnvioCorreo =
+  | { estado: 'ENVIADO'; idExterno?: string }
+  | { estado: 'SIN_CONFIGURAR' }
+  | { estado: 'FALLO'; motivo: string };
 
 /**
  * Envío de correo transaccional con Brevo.
@@ -32,13 +49,18 @@ export class CorreoService {
     return Boolean(this.config.get<string>('BREVO_API_KEY'));
   }
 
-  async enviar(envio: EnvioCorreo): Promise<boolean> {
+  /**
+   * Envío con resultado distinguible: quien necesita saber POR QUÉ no salió el
+   * correo (las notificaciones, que guardan estado) usa este método; `enviar`
+   * lo reduce a un booleano para quien solo quiere saber si salió.
+   */
+  async enviarDetallado(envio: EnvioCorreo): Promise<ResultadoEnvioCorreo> {
     if (!this.habilitado) {
       this.logger.warn(
         `Brevo sin configurar. Correo no enviado a ${envio.para} — asunto: "${envio.asunto}"`,
       );
       if (envio.texto) this.logger.debug(`Contenido:\n${envio.texto}`);
-      return false;
+      return { estado: 'SIN_CONFIGURAR' };
     }
 
     try {
@@ -64,19 +86,27 @@ export class CorreoService {
 
       if (!respuesta.ok) {
         const detalle = await respuesta.text().catch(() => '');
-        this.logger.error(`Brevo respondió ${respuesta.status}: ${detalle.slice(0, 500)}`);
-        return false;
+        const motivo = `Brevo respondió ${respuesta.status}: ${detalle.slice(0, 500)}`;
+        this.logger.error(motivo);
+        return { estado: 'FALLO', motivo };
       }
 
-      return true;
+      // El id del mensaje sirve para rastrear la entrega; que no venga no vuelve
+      // fallido un envío que Brevo ya aceptó.
+      const cuerpo = (await respuesta.json().catch(() => null)) as { messageId?: string } | null;
+      return { estado: 'ENVIADO', idExterno: cuerpo?.messageId };
     } catch (fallo) {
-      this.logger.error(
-        `No se pudo enviar el correo a ${envio.para}: ${
-          fallo instanceof Error ? fallo.message : String(fallo)
-        }`,
-      );
-      return false;
+      const motivo = `No se pudo enviar el correo a ${envio.para}: ${
+        fallo instanceof Error ? fallo.message : String(fallo)
+      }`;
+      this.logger.error(motivo);
+      return { estado: 'FALLO', motivo };
     }
+  }
+
+  /** `true` solo si Brevo aceptó el correo; sin configurar o con fallo, `false`. */
+  async enviar(envio: EnvioCorreo): Promise<boolean> {
+    return (await this.enviarDetallado(envio)).estado === 'ENVIADO';
   }
 
   /** Código de verificación para recuperar la contraseña. */

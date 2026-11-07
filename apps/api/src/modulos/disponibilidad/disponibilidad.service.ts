@@ -277,19 +277,16 @@ export class DisponibilidadService {
       // ocupados: el panel los pinta en gris y así el barbero ve su día entero,
       // no solo lo que queda libre.
       for (const inicio of generarInicios(jornada, paso, paso)) {
-        const cabe = inicio + duracionNecesaria <= jornada.horaFin;
-        const tramo = tramosLibres.find(
-          (t) => inicio >= t.horaInicio && inicio + duracionNecesaria <= t.horaFin,
-        );
-        const choque = ocupaciones.find((o) =>
-          seSolapan(o, { horaInicio: inicio, horaFin: inicio + duracionNecesaria }),
-        );
-
-        let motivo: HuecoDisponible['motivo'] | undefined;
-        if (esHoy && inicio < minutosAhora) motivo = 'PASADO';
-        else if (esHoy && inicio < minutosAhora + antelacion) motivo = 'ANTELACION';
-        else if (choque) motivo = choque.motivo;
-        else if (!cabe || !tramo) motivo = 'NO_CABE';
+        const motivo = this.motivoDelInicio({
+          inicio,
+          jornada,
+          ocupaciones,
+          tramosLibres,
+          duracionNecesaria,
+          esHoy,
+          minutosAhora,
+          antelacion,
+        });
 
         huecos.push({
           inicioEn: aInstante(opciones.fecha, inicio, zona).toISOString(),
@@ -471,6 +468,18 @@ export class DisponibilidadService {
     barberoId?: string;
     desde: string;
     hasta: string;
+    /**
+     * Opcionales y aditivos: sin ellos el calendario es el del panel (todos
+     * los barberos, capacidad de un slot, sin reglas del cliente). Con
+     * `servicioIds` cuenta solo los inicios en que cabe esa duración.
+     */
+    servicioIds?: string[];
+    /** Aplica la antelación mínima de hoy, como el detalle del día. */
+    aplicarReglasCliente?: boolean;
+    /** Solo barberos visibles en la web (el canal público). */
+    soloVisiblesWeb?: boolean;
+    /** Al reprogramar, la propia cita no cuenta como ocupada (igual que en `delDia`). */
+    excluirReservaId?: string;
   }): Promise<DiaCalendario[]> {
     const config = await this.configuracion.obtener();
     const zona = config.zonaHoraria;
@@ -503,7 +512,12 @@ export class DisponibilidadService {
         where: {
           sedeId,
           ...(opciones.barberoId ? { usuarioId: opciones.barberoId } : {}),
-          usuario: { activo: true, eliminadoEn: null, rol: 'BARBERO' },
+          usuario: {
+            activo: true,
+            eliminadoEn: null,
+            rol: 'BARBERO',
+            ...(opciones.soloVisiblesWeb ? { visibleWeb: true } : {}),
+          },
         },
         include: { bloques: true, usuario: { select: { slotMinutos: true } } },
       }),
@@ -519,10 +533,23 @@ export class DisponibilidadService {
           ...(opciones.barberoId ? { barberoId: opciones.barberoId } : {}),
           estado: { in: ['PENDIENTE', 'CONFIRMADA', 'EN_CURSO', 'COMPLETADA'] },
           inicioEn: { gte: inicio, lt: fin },
+          ...(opciones.excluirReservaId ? { id: { not: opciones.excluirReservaId } } : {}),
         },
         select: { barberoId: true, inicioEn: true, finConBufferEn: true },
       }),
     ]);
+
+    // Modo exacto: se evalúa cada inicio con la misma regla que el detalle del
+    // día. Es cómputo sobre los datos ya traídos, no una consulta por día.
+    const exacto = opciones.servicioIds !== undefined || opciones.aplicarReglasCliente === true;
+    let duracionNecesaria = 0;
+    if (exacto) {
+      const { duracionServicio, buffer } = await this.duracionDe(opciones.servicioIds ?? []);
+      duracionNecesaria = duracionServicio + buffer;
+    }
+    const antelacion = opciones.aplicarReglasCliente ? config.minAntelacionMinutos : 0;
+    const hoy = hoyLocal(zona);
+    const minutosAhora = aMinutosDelDia(new Date(), zona);
 
     const resultado: DiaCalendario[] = [];
 
@@ -552,7 +579,10 @@ export class DisponibilidadService {
           : { horaInicio: horario.horaInicio, horaFin: horario.horaFin };
 
       let totalHuecos = 0;
+      // Modo normal: citas (en slots). Modo exacto: inicios que no se pueden
+      // ofrecer, sea cual sea el motivo. Por eso `reservas` lleva su propia cuenta.
       let huecosOcupados = 0;
+      let reservasExactas = 0;
 
       for (const agenda of agendas.filter((a) => a.diaSemana === diaSemana)) {
         const excepcion = excepciones.find(
@@ -580,6 +610,74 @@ export class DisponibilidadService {
 
         const paso =
           agenda.slotMinutos ?? agenda.usuario.slotMinutos ?? config.slotMinutosDefault;
+
+        if (exacto) {
+          const ocupaciones: Ocupacion[] = [
+            ...agenda.bloques.map((b) => ({
+              horaInicio: b.horaInicio,
+              horaFin: b.horaFin,
+              motivo: (b.tipo === 'ALMUERZO' ? 'ALMUERZO' : 'DESCANSO') as Ocupacion['motivo'],
+            })),
+            ...reservas
+              .filter(
+                (r) =>
+                  r.barberoId === agenda.usuarioId && aFechaLocal(r.inicioEn, zona) === fecha,
+              )
+              .map((r) => ({
+                horaInicio: aMinutosDelDia(r.inicioEn, zona),
+                horaFin: aMinutosDelDia(r.finConBufferEn, zona),
+                motivo: 'OCUPADO' as const,
+              })),
+          ];
+          const tramosLibres = restarBloques(
+            jornada,
+            ocupaciones.map((o) => ({ horaInicio: o.horaInicio, horaFin: o.horaFin })),
+          );
+          /**
+           * Almuerzos y descansos NO son capacidad del día, y por eso no entran
+           * en `totalHuecos`: el modo normal se los quita con `restarBloques`
+           * antes de contar inicios, y el modo exacto tiene que descontarlos
+           * igual. Si no, `totalHuecos` significa dos cosas según el flag
+           * `exacto` —la trampa que la decisión R20 arregló para `reservas` y
+           * dejó viva en sus dos campos vecinos— y `estado` sale de una
+           * proporción con un denominador distinto en cada modo.
+           *
+           * Descontarlos no vuelve los dos modos idénticos, y no pretende
+           * serlo: coinciden mientras la duración necesaria no pase del paso,
+           * y cuando sí lo pasa el exacto cuenta menos a propósito, porque un
+           * inicio desde el que este servicio no cabe no es capacidad para
+           * él. Lo que se arregla aquí es el denominador, no la fórmula.
+           *
+           * `huecosLibres` no se mueve: un inicio que choca con un bloque ya
+           * sumaba en `totalHuecos` y en `huecosOcupados` a la vez, así que
+           * quitarlo de los dos deja la resta igual. El contraste se mide
+           * contra la misma ventana que usa `motivoDelInicio`, para que no
+           * exista un inicio descartado aquí que allí saliera libre.
+           */
+          const bloquesDelDia = ocupaciones.filter((o) => o.motivo !== 'OCUPADO');
+          const tapadoPorBloque = (inicio: number): boolean =>
+            bloquesDelDia.some((bloque) =>
+              seSolapan(bloque, { horaInicio: inicio, horaFin: inicio + duracionNecesaria }),
+            );
+
+          for (const inicio of generarInicios(jornada, paso, paso)) {
+            if (tapadoPorBloque(inicio)) continue;
+            totalHuecos += 1;
+            const motivo = this.motivoDelInicio({
+              inicio,
+              jornada,
+              ocupaciones,
+              tramosLibres,
+              duracionNecesaria,
+              esHoy: fecha === hoy,
+              minutosAhora,
+              antelacion,
+            });
+            if (motivo !== undefined) huecosOcupados += 1;
+            if (motivo === 'OCUPADO') reservasExactas += 1;
+          }
+          continue;
+        }
 
         const tramos = restarBloques(jornada, agenda.bloques);
         const capacidad = tramos.reduce(
@@ -619,7 +717,7 @@ export class DisponibilidadService {
                 : 'libre',
         totalHuecos,
         huecosLibres,
-        reservas: huecosOcupados,
+        reservas: exacto ? reservasExactas : huecosOcupados,
         ...(especial ? { etiqueta: especial.nombre } : {}),
       });
     }
@@ -628,6 +726,37 @@ export class DisponibilidadService {
   }
 
   // ---------------------------------------------------------- auxiliares
+
+  /**
+   * Por qué un inicio no se puede ofrecer (`undefined` si está libre). Es la
+   * única definición de «hueco libre»: la usan el detalle del día y el
+   * calendario, para que nunca discrepen.
+   */
+  private motivoDelInicio(datos: {
+    inicio: number;
+    jornada: RangoMinutos;
+    ocupaciones: Ocupacion[];
+    tramosLibres: RangoMinutos[];
+    duracionNecesaria: number;
+    esHoy: boolean;
+    minutosAhora: number;
+    antelacion: number;
+  }): HuecoDisponible['motivo'] | undefined {
+    const { inicio, jornada, ocupaciones, tramosLibres, duracionNecesaria } = datos;
+    const cabe = inicio + duracionNecesaria <= jornada.horaFin;
+    const tramo = tramosLibres.find(
+      (t) => inicio >= t.horaInicio && inicio + duracionNecesaria <= t.horaFin,
+    );
+    const choque = ocupaciones.find((o) =>
+      seSolapan(o, { horaInicio: inicio, horaFin: inicio + duracionNecesaria }),
+    );
+
+    if (datos.esHoy && inicio < datos.minutosAhora) return 'PASADO';
+    if (datos.esHoy && inicio < datos.minutosAhora + datos.antelacion) return 'ANTELACION';
+    if (choque) return choque.motivo;
+    if (!cabe || !tramo) return 'NO_CABE';
+    return undefined;
+  }
 
   /** Suma de duraciones y buffer de los servicios elegidos. */
   private async duracionDe(

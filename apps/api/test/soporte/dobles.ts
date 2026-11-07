@@ -51,6 +51,8 @@ const MODELOS = [
   'canjeFidelidad',
   'configuracionGlobal',
   'programaFidelidad',
+  'notificacion',
+  'plantillaNotificacion',
 ] as const;
 
 export type PrismaDoble = Record<(typeof MODELOS)[number], ModeloDoble> & {

@@ -902,7 +902,8 @@ model ConfigComision {
 model PlantillaNotificacion {
   id    String            @id @default(uuid()) @db.Uuid
   /// Identificador estable usado en el código: reserva.confirmada
-  clave String            @unique @db.VarChar(80)
+  /// (qué evento); el mismo evento tiene una plantilla por canal.
+  clave String            @db.VarChar(80)
   canal CanalNotificacion
   nombre String           @db.VarChar(140)
   asunto String?          @db.VarChar(200)
@@ -919,6 +920,7 @@ model PlantillaNotificacion {
   creadoEn      DateTime @default(now())
   actualizadoEn DateTime @updatedAt
 
+  @@unique([clave, canal])
   @@map("plantillas_notificacion")
 }
 

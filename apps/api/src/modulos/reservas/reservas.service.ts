@@ -78,7 +78,14 @@ export class ReservasService {
    * la escritura otra persona ocupó el hueco, el `INSERT` falla y el filtro
    * global lo traduce a "ese horario acaba de ocuparse".
    */
-  async crear(datos: CrearReservaDto, actor: UsuarioAutenticado, desdeWeb = false) {
+  async crear(datos: CrearReservaDto, actor: UsuarioAutenticado | null, desdeWeb = false) {
+    // Solo el canal público puede no tener actor. Una cita del panel sin autor
+    // sería un agujero de auditoría silencioso: aquí es un error de programación
+    // y debe fallar a gritos, antes de escribir nada.
+    if (!desdeWeb && !actor) {
+      throw new Error('Una reserva creada desde el panel exige un actor autenticado');
+    }
+
     const zona = await this.configuracion.zonaHoraria();
     const inicioEn = new Date(datos.inicioEn);
 
@@ -95,13 +102,13 @@ export class ReservasService {
       aplicarReglasCliente: desdeWeb,
     });
 
-    const clienteId = await this.resolverCliente(datos, actor);
+    const clienteId = await this.resolverCliente(datos, actor, desdeWeb);
     if (clienteId) await this.verificarLimiteReservas(clienteId, desdeWeb);
 
     const config = await this.configuracion.obtener();
     const confirmar = desdeWeb ? !config.requiereConfirmacion : datos.confirmar;
 
-    const reserva = await this.prisma.$transaction(async (tx) => {
+    const reserva = await this.escribirCita(async (tx) => {
       const creada = await this.insertarReserva(tx, {
         clienteId,
         sedeId: datos.sedeId,
@@ -113,7 +120,7 @@ export class ReservasService {
         descuento: datos.descuento,
         notaCliente: datos.notaCliente,
         notaInterna: datos.notaInterna,
-        creadoPorId: desdeWeb ? null : actor.id,
+        creadoPorId: actor && !desdeWeb ? actor.id : null,
       });
 
       // El premio se aplica al cobrar, no al reservar: hasta que el cliente no
@@ -185,7 +192,7 @@ export class ReservasService {
     const clienteId = (await this.resolverCliente(datos, actor)) ?? (await this.clientes.clienteGenerico()).id;
     const turno = await this.siguienteTurno(datos.barberoId, inicioEn, zona);
 
-    const reserva = await this.prisma.$transaction(async (tx) =>
+    const reserva = await this.escribirCita(async (tx) =>
       this.insertarReserva(tx, {
         clienteId,
         sedeId: datos.sedeId,
@@ -374,7 +381,17 @@ export class ReservasService {
    * es el caso que pidió el cliente: el barbero se mueve de local y el cliente
    * acepta ir allí, así que la cita se traslada sin cancelarla.
    */
-  async reprogramar(id: string, datos: ReprogramarReservaDto, actor: UsuarioAutenticado, desdeCliente = false) {
+  async reprogramar(
+    id: string,
+    datos: ReprogramarReservaDto,
+    actor: UsuarioAutenticado | null,
+    desdeCliente = false,
+  ) {
+    // Mismo criterio que en `crear`: sin actor solo puede mover el propio cliente.
+    if (!desdeCliente && !actor) {
+      throw new Error('Reprogramar desde el panel exige un actor autenticado');
+    }
+
     const zona = await this.configuracion.zonaHoraria();
     const config = await this.configuracion.obtener();
     const antes = await this.obtener(id);
@@ -415,11 +432,45 @@ export class ReservasService {
     const finEn = new Date(inicioEn.getTime() + antes.duracionMinutos * 60_000);
     const finConBufferEn = new Date(finEn.getTime() + antes.bufferMinutos * 60_000);
 
-    const despues = await this.prisma.reserva.update({
-      where: { id },
-      data: { sedeId, barberoId, inicioEn, finEn, finConBufferEn },
-      include: INCLUDE_RESERVA,
-    });
+    // Misma ventana que en `cancelar`, y aquí con más consecuencias: dos
+    // reprogramaciones del cliente que leen a la vez rotarían el token dos
+    // veces, y la respuesta de una llevaría un token que la base ya no guarda:
+    // su enlace quedaría muerto sin que nada diera error. Por eso la escritura
+    // exige que la fila siga tal como se leyó (estado, hueco, sede, barbero y
+    // token); si otra petición la tocó en medio, esta recibe `CONFLICTO` y el
+    // cliente puede recargar y reintentar con la cita ya actualizada.
+    let despues;
+    try {
+      despues = await this.prisma.reserva.update({
+        where: {
+          id,
+          estado: antes.estado,
+          inicioEn: antes.inicioEn,
+          sedeId: antes.sedeId,
+          barberoId: antes.barberoId,
+          tokenGestion: antes.tokenGestion ?? undefined,
+        },
+        data: {
+          sedeId,
+          barberoId,
+          inicioEn,
+          finEn,
+          finConBufferEn,
+          // Asimetría deliberada, no la «arregles». Si mueve la cita el propio
+          // cliente, el token se rota: la respuesta le devuelve el nuevo y el
+          // enlace viejo (que pudo quedar en un correo o en WhatsApp) deja de
+          // servir. Si la mueve recepción NO se rota: nadie le enviaría el
+          // enlace nuevo al cliente, que perdería el acceso a su propia cita, y
+          // como el token identifica la cita (no una sesión) rotarlo aquí no
+          // protege de nada.
+          ...(desdeCliente ? { tokenGestion: tokenGestion() } : {}),
+        },
+        include: INCLUDE_RESERVA,
+      });
+    } catch (error) {
+      if (PrismaService.esNoEncontrado(error)) throw new ErrorNegocio(CODIGOS_ERROR.CONFLICTO, 409);
+      throw error;
+    }
 
     const cambioSede = sedeId !== antes.sedeId ? ` y de sede a ${despues.sede.nombre}` : '';
     const cambioBarbero =
@@ -465,16 +516,37 @@ export class ReservasService {
       }
     }
 
-    const despues = await this.prisma.reserva.update({
-      where: { id },
-      data: {
-        estado: 'CANCELADA',
-        canceladaEn: new Date(),
-        canceladaPor: origen,
-        motivoCancelacion: datos.motivo,
-      },
-      include: INCLUDE_RESERVA,
-    });
+    // Comparar y escribir en un solo paso: `where` lleva el estado que se leyó
+    // arriba. Entre ese `obtener` y este `update` hay una ventana: dos
+    // peticiones que cancelan a la vez (el cliente con el enlace, o él y la
+    // recepción) leen las dos «CONFIRMADA». Sin esta condición ganaban las dos:
+    // la segunda pisaba la fecha y el motivo de la primera, recalculaba las
+    // métricas otra vez y dejaba dos asientos de auditoría. Con ella, la
+    // segunda no encuentra fila y recibe el mismo error que si hubiera llegado
+    // un instante después.
+    let despues;
+    try {
+      despues = await this.prisma.reserva.update({
+        where: { id, estado: antes.estado },
+        data: {
+          estado: 'CANCELADA',
+          canceladaEn: new Date(),
+          canceladaPor: origen,
+          motivoCancelacion: datos.motivo,
+          // Una cita cancelada no se gestiona más: el enlace deja de servir.
+          tokenGestion: null,
+        },
+        include: INCLUDE_RESERVA,
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        const actual = await this.prisma.reserva.findUnique({ where: { id }, select: { estado: true } });
+        throw new ErrorNegocio(CODIGOS_ERROR.ESTADO_RESERVA_INVALIDO, 409, {
+          estadoActual: actual?.estado,
+        });
+      }
+      throw error;
+    }
 
     // El hueco queda libre al instante: la restricción de exclusión solo mira
     // los estados que ocupan tiempo, y CANCELADA no es uno de ellos.
@@ -734,8 +806,12 @@ export class ReservasService {
    * devuelve `null` y es quien llama el que decide si usa el genérico.
    */
   private async resolverCliente(
-    datos: { clienteId?: string; clienteNuevo?: { nombreCompleto: string; telefono: string; notas?: string } },
-    actor: UsuarioAutenticado,
+    datos: {
+      clienteId?: string;
+      clienteNuevo?: { nombreCompleto: string; telefono: string; email?: string; notas?: string };
+    },
+    actor: UsuarioAutenticado | null,
+    desdeWeb = false,
   ): Promise<string | null> {
     if (datos.clienteId) {
       const existe = await this.prisma.cliente.findFirst({
@@ -761,12 +837,22 @@ export class ReservasService {
         {
           nombreCompleto: datos.clienteNuevo.nombreCompleto,
           telefono: datos.clienteNuevo.telefono,
-          notas: datos.clienteNuevo.notas,
-          aceptaWhatsapp: true,
-          aceptaEmail: false,
+          email: datos.clienteNuevo.email,
+          // Sin notas la clave no existe: al reactivar no puede pisar las que ya había.
+          ...(datos.clienteNuevo.notas !== undefined ? { notas: datos.clienteNuevo.notas } : {}),
+          // Consentimientos: `aceptaWhatsapp` no se manda nunca. En una ficha
+          // nueva rige el `@default(true)` de la columna; al reactivar una
+          // existente, `ClientesService.crear` copia estos datos tal cual y
+          // mandarlo restauraría un consentimiento que el cliente pudo retirar.
+          // `aceptaEmail` sigue la misma regla de no pisar nada: rellenar el
+          // correo en el formulario público es el acto de consentir, así que
+          // solo se manda `true` cuando hay correo; sin correo se omite (un
+          // `false` borraría un consentimiento dado antes). Y solo en el canal
+          // público: si el correo lo escribe recepción en el panel se guarda el
+          // dato, pero nadie ha consentido nada.
+          ...(desdeWeb && datos.clienteNuevo.email ? { aceptaEmail: true } : {}),
           activo: true,
-          incluye: undefined,
-        } as never,
+        },
         actor,
       );
       return creado.id;
@@ -815,6 +901,21 @@ export class ReservasService {
       ),
       cuentaFidelidad: ordenados.some((s) => s.cuentaFidelidad),
     };
+  }
+
+  /**
+   * Transacción que escribe una cita nueva. Un interbloqueo aquí es la carrera
+   * por el mismo hueco (ver `PrismaService.esInterbloqueo`): se traduce igual
+   * que la violación de la restricción de exclusión, para que el perdedor lea
+   * «ese horario acaba de ocuparse» y no un error 500.
+   */
+  private async escribirCita<T>(escribir: (tx: Prisma.TransactionClient) => Promise<T>): Promise<T> {
+    try {
+      return await this.prisma.$transaction(escribir);
+    } catch (error) {
+      if (PrismaService.esInterbloqueo(error)) throw new ErrorNegocio(CODIGOS_ERROR.RESERVA_SOLAPADA, 409);
+      throw error;
+    }
   }
 
   private async insertarReserva(
