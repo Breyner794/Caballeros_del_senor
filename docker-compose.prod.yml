@@ -27,10 +27,17 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
-    # Sin `ports`. El 5433 del compose de desarrollo es un puente hacia tu
-    # máquina; en el VPS dejaría la base de datos escuchando en Internet.
-    # Para inspeccionarla desde tu equipo usa un túnel SSH, no un puerto
-    # abierto: ssh -L 5433:localhost:5432 usuario@vps
+    # El prefijo 127.0.0.1 es lo que hace esto seguro: ata el puerto al
+    # loopback del VPS, no a su IP pública. No es lo mismo que el
+    # "5433:5432" del compose de desarrollo, que escucha en todas las
+    # interfaces y dejaría la base de datos expuesta a Internet.
+    #
+    # Sirve para administrar la base por túnel SSH, que es la única forma de
+    # sembrarla: el script de seed usa tsx y `pnpm --prod deploy` lo poda, así
+    # que no se puede ejecutar dentro del contenedor.
+    #   ssh -L 5433:localhost:5432 usuario@vps
+    ports:
+      - "127.0.0.1:5432:5432"
     networks:
       - interna
     healthcheck:
