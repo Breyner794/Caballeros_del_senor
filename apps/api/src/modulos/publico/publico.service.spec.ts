@@ -136,6 +136,19 @@ describe('PublicoService.opciones', () => {
     });
   });
 
+  it('no anuncia más días de anticipación de los que el motor calcula', async () => {
+    // El frontend acota la navegación del calendario con este número: si la
+    // configuración pide 365 y el motor solo devuelve 92 fechas, anunciar 365
+    // es pintarle al cliente nueve meses de días deshabilitados.
+    const conUnAno = new PublicoService(
+      prisma as never,
+      crearConfiguracionDoble(configuracion({ maxDiasAnticipacion: 365 })) as never,
+      crearDisponibilidadDoble() as never,
+    );
+    const { config } = await conUnAno.opciones();
+    expect(config.maxDiasAnticipacion).toBe(91);
+  });
+
   it('no revienta con una sede sin barberos visibles', async () => {
     prisma.sede.findMany.mockResolvedValue([sede(SEDE_VACIA, 'Centro')]);
     const { sedes } = await servicio.opciones();
@@ -454,6 +467,37 @@ describe('PublicoService.calendario', () => {
     );
     expect(disponibilidad.calendario).toHaveBeenCalledWith(
       expect.objectContaining({ excluirReservaId: 'reserva-propia', soloVisiblesWeb: true }),
+    );
+  });
+
+  it('con maxDiasAnticipacion mayor que el tope del motor recorta a hoy + 91', async () => {
+    // El motor recorta el rango a 92 fechas (`rangoDeFechas(desde, hasta, 92)`)
+    // SIN AVISAR, y el panel admite hasta 365 días de anticipación. Si la
+    // fachada anunciara 180, el cliente navegaría hasta el mes 6 y vería todos
+    // los días deshabilitados: aquí la configuración se acota al límite real.
+    const conMedioAno = new PublicoService(
+      crearPrismaDoble() as never,
+      crearConfiguracionDoble(configuracion({ maxDiasAnticipacion: 180 })) as never,
+      disponibilidad as never,
+    );
+
+    await conMedioAno.calendario({
+      sedeId: SEDE_A,
+      desde: '2026-11-10',
+      hasta: '2027-06-01',
+      servicioIds: [SERVICIO],
+    });
+
+    // Hoy es 2026-11-04 en Bogotá: hoy + 91 días es 2027-02-03.
+    expect(disponibilidad.calendario).toHaveBeenCalledWith(
+      expect.objectContaining({ hasta: '2027-02-03' }),
+    );
+  });
+
+  it('un maxDiasAnticipacion por debajo del tope del motor se respeta tal cual', async () => {
+    await consultar('2026-11-10', '2027-03-01');
+    expect(disponibilidad.calendario).toHaveBeenCalledWith(
+      expect.objectContaining({ hasta: '2026-12-19' }),
     );
   });
 

@@ -29,6 +29,27 @@ const BARBERO_VISIBLE_EN_WEB = {
 } as const;
 
 /**
+ * Tope de días que el canal público puede anunciar y entregar.
+ *
+ * El motor recorta el rango del calendario con `rangoDeFechas(desde, hasta, 92)`,
+ * y ese 92 cuenta FECHAS con los dos extremos incluidos: empezando en `hoy`,
+ * el último día que de verdad se calcula es `hoy + 91`. El panel admite
+ * `maxDiasAnticipacion` hasta 365, así que sin este tope la web dejaría
+ * navegar a meses que el motor nunca devuelve: el cliente vería todos los días
+ * deshabilitados o «no hay días con horario libre», sin pista de por qué.
+ *
+ * No es una regla de negocio que compita con la configuración: es el límite
+ * real del motor, hecho visible para que la fachada no prometa más de lo que
+ * entrega. Si algún día el motor admite un rango mayor, este número sube con él.
+ */
+const MAX_DIAS_VENTANA_PUBLICA = 91;
+
+/** Lo que la web puede ofrecer de verdad: la configuración, acotada por el motor. */
+function diasAnticipacionEfectivos(maxDiasAnticipacion: number): number {
+  return Math.min(maxDiasAnticipacion, MAX_DIAS_VENTANA_PUBLICA);
+}
+
+/**
  * Fachada de lectura del canal público: llama a la persistencia y traduce con
  * los mapeadores. No contiene lógica de negocio. El camino de escritura (crear
  * la cita) vive en `PublicoReservasService`, que se apoya en este servicio para
@@ -190,13 +211,14 @@ export class PublicoService {
 
   /**
    * Primer y último día en que el cliente puede reservar: hoy y hoy más
-   * `maxDiasAnticipacion`. `hoy` se calcula una sola vez para que, en el cruce
-   * de medianoche, ambos extremos salgan del mismo día.
+   * `maxDiasAnticipacion`, sin pasar de `MAX_DIAS_VENTANA_PUBLICA`. `hoy` se
+   * calcula una sola vez para que, en el cruce de medianoche, ambos extremos
+   * salgan del mismo día.
    */
   private async ventanaDeReserva(): Promise<{ hoy: string; tope: string }> {
     const config = await this.configuracion.obtener();
     const hoy = hoyLocal(config.zonaHoraria);
-    return { hoy, tope: sumarDias(hoy, config.maxDiasAnticipacion) };
+    return { hoy, tope: sumarDias(hoy, diasAnticipacionEfectivos(config.maxDiasAnticipacion)) };
   }
 }
 
@@ -253,7 +275,10 @@ function aConfigPublica(config: {
 }): ConfigPublica {
   return {
     permiteElegirBarbero: config.permiteElegirBarbero,
-    maxDiasAnticipacion: config.maxDiasAnticipacion,
+    // El mismo tope que aplica `ventanaDeReserva`: el frontend acota la
+    // navegación del calendario con este número, así que anunciar más de lo
+    // que el motor calcula es pintarle meses vacíos al cliente.
+    maxDiasAnticipacion: diasAnticipacionEfectivos(config.maxDiasAnticipacion),
     minAntelacionMinutos: config.minAntelacionMinutos,
     zonaHoraria: config.zonaHoraria,
     moneda: config.moneda,
