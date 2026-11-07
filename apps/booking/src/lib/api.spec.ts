@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { CODIGOS_ERROR, MENSAJES_ERROR } from '@cds/shared';
 import { ErrorApi, guardarTokenGestion, peticion } from '@/lib/api';
 
@@ -147,5 +147,46 @@ describe('cliente HTTP del canal público', () => {
     expect(error.codigo).toBe(CODIGOS_ERROR.ERROR_RED);
     expect(error.mensaje).toBe(MENSAJES_ERROR.ERROR_RED);
     expect(error.status).toBe(0);
+  });
+});
+
+// =============================================================== URL base
+
+describe('URL base de la API', () => {
+  /**
+   * `VITE_API_URL` se lee al importar el módulo, así que cada caso reimporta
+   * el módulo con la variable ya puesta.
+   */
+  async function urlPedida(valor?: string): Promise<string> {
+    vi.resetModules();
+    vi.stubEnv('VITE_API_URL', valor as string);
+    vi.stubGlobal('fetch', vi.fn(async () => respuestaJson({ ok: true })));
+    const modulo = await import('@/lib/api');
+    await modulo.peticion('/publico/sedes');
+    return String(vi.mocked(fetch).mock.calls[0]![0]);
+  }
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('usa la variable cuando trae una URL', async () => {
+    expect(await urlPedida('https://api.reservas.test/api/v1')).toBe(
+      'https://api.reservas.test/api/v1/publico/sedes',
+    );
+  });
+
+  it('una variable vacía cuenta como no configurada', async () => {
+    // Es el error más fácil de cometer en un panel de despliegue: crear la
+    // variable y dejarla sin valor. Con `??` la cadena vacía pasaba el filtro
+    // y todas las peticiones salían a una URL relativa: la web no cargaría
+    // nada, y solo en producción.
+    expect(await urlPedida('')).toBe('http://localhost:3001/api/v1/publico/sedes');
+    expect(await urlPedida('   ')).toBe('http://localhost:3001/api/v1/publico/sedes');
+  });
+
+  it('sin la variable cae al valor de desarrollo', async () => {
+    expect(await urlPedida(undefined)).toBe('http://localhost:3001/api/v1/publico/sedes');
   });
 });

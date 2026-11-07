@@ -1,6 +1,12 @@
 import { CODIGOS_ERROR, MENSAJES_ERROR, type RespuestaError } from '@cds/shared';
 
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:3001/api/v1';
+/**
+ * `??` no cubre la cadena vacía, y crear la variable en el panel de despliegue
+ * y dejarla sin valor es el error más fácil de cometer: con `''` todas las
+ * peticiones saldrían a una URL relativa y la web no cargaría nada, solo en
+ * producción. Vacía equivale a no configurada.
+ */
+const BASE = import.meta.env.VITE_API_URL?.trim() || 'http://localhost:3001/api/v1';
 
 /**
  * Cliente HTTP de la web pública.
