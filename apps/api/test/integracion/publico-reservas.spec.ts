@@ -420,7 +420,9 @@ describe('carreras entre dos peticiones simultáneas', () => {
     // caminos según quién llegue al índice primero: la perdedora recibe 23P01
     // (violación de la exclusión) o, si las dos ya habían escrito su fila,
     // 40P01 (interbloqueo y una de las dos se aborta). El cliente debe ver lo
-    // mismo en ambos casos.
+    // mismo en ambos casos: mismo código, mismo 409 y una rejilla con el día.
+    // Lo que NO es igual en los dos caminos es cuándo confirma el ganador
+    // respecto al recálculo del perdedor; eso se explica en la aserción.
     for (let ronda = 0; ronda < RONDAS_DE_CARRERA; ronda++) {
       await limpiarReservas();
       await limpiarClientesPublicos();
@@ -451,7 +453,30 @@ describe('carreras entre dos peticiones simultáneas', () => {
       expect(perdedora.codigo).toBe(CODIGOS_ERROR.RESERVA_SOLAPADA);
       expect(perdedora.getStatus()).toBe(409);
       const { huecos } = perdedora.detalle as { huecos: { inicioEn: string; disponible: boolean }[] };
-      expect(huecos.find((h) => h.inicioEn === DIEZ)?.disponible).toBe(false);
+      expect(huecos.some((h) => h.inicioEn === DIEZ)).toBe(true);
+
+      // Que ESA rejilla marque el hueco como ocupado no se puede exigir, y es
+      // lo que hacía intermitente a este caso. Por el camino del `23P01` el
+      // perdedor choca contra la fila del ganador, y para chocar el ganador ya
+      // tuvo que confirmar, así que su recálculo la ve. Por el del `40P01`
+      // PostgreSQL aborta a una de las dos y la otra confirma en paralelo: el
+      // recálculo del perdedor corre sin garantía de que esa confirmación ya
+      // haya ocurrido, y entonces lee el hueco libre. El sistema no promete esa
+      // ordenación —la rejilla es una ayuda para repintar, no una verdad
+      // transaccional— así que la prueba no la exige.
+      //
+      // Lo que sí se exige, cerrada ya la carrera: una lectura nueva ve el
+      // hueco ocupado. El ganador cumplió su promesa, luego su transacción
+      // confirmó, luego la disponibilidad lo refleja. Eso es determinista, y
+      // cae igual que antes si la restricción de exclusión dejara entrar a las
+      // dos o si la disponibilidad no viera la fila confirmada.
+      const trasLaCarrera = await lecturas.disponibilidad({
+        sedeId: IDS_PUBLICO.sede,
+        barberoId: IDS_PUBLICO.barberoA,
+        fecha: DIA,
+        servicioIds: [IDS_PUBLICO.servicio],
+      });
+      expect(trasLaCarrera.huecos.find((h) => h.inicioEn === DIEZ)?.disponible).toBe(false);
 
       // Y en la tabla hay una sola cita en ese hueco.
       expect(await prisma().reserva.count({ where: { barberoId: IDS_PUBLICO.barberoA } })).toBe(1);
