@@ -99,6 +99,23 @@ export function Cita() {
     tokenVigente.current = tokenDeLaUrl;
     // La cita anterior no es la de este enlace: ni su caché ni sus avisos sobreviven.
     clienteConsultas.removeQueries({ queryKey: claveCita });
+    /**
+     * Y tampoco su disponibilidad. Las claves de `consultas.ts` distinguen
+     * `mi-cita` de `general`, pero no CUÁL cita se está excluyendo: la rejilla
+     * y el calendario de `mi-reserva` se calculan sin contar la propia cita, y
+     * con dos citas activas por cliente —la configuración lo permite— los
+     * datos cacheados para la cita A valdrían para la B si comparten sede,
+     * servicios y rango. El tramo de A saldría libre sin estarlo y el propio
+     * de B saldría ocupado: justo lo que la exclusión existe para evitar.
+     *
+     * Se borran las dos ramas enteras en vez de meter el código de la cita en
+     * la clave: el token no entra en la caché por decisión expresa, y añadir
+     * una parte más a la clave obligaría a bajar el código de la cita hasta
+     * `PasoFecha` y `PasoHora` para acertar siempre. Borrar es exacto por
+     * construcción; el coste es una consulta de más al cambiar de enlace.
+     */
+    clienteConsultas.removeQueries({ queryKey: ['publico', 'disponibilidad'] });
+    clienteConsultas.removeQueries({ queryKey: ['publico', 'calendario'] });
     setToken(tokenDeLaUrl);
     setApertura((n) => n + 1);
   }, [tokenDeLaUrl, clienteConsultas]);

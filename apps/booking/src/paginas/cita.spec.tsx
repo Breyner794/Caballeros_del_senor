@@ -277,6 +277,35 @@ describe('pegar otro enlace de gestión en la misma pestaña', () => {
     expect(screen.queryByText(/quedó reprogramada/)).not.toBeInTheDocument();
   });
 
+  it('no reutiliza la disponibilidad calculada excluyendo la cita anterior', async () => {
+    const u = usuario();
+    montar();
+    await hastaHoras(u);
+    await screen.findByRole('button', { name: '9:30 a. m.' });
+    const calendariosDeA = llamadasA('GET', '/publico/mi-reserva/calendario').length;
+    const rejillasDeA = llamadasA('GET', '/publico/mi-reserva/disponibilidad').length;
+    expect(calendariosDeA).toBeGreaterThan(0);
+    expect(rejillasDeA).toBeGreaterThan(0);
+
+    // El cliente pega el enlace de su otra cita activa (la configuración
+    // permite dos): el servidor ya solo acepta ese token.
+    tokenVigente = TOKEN_OTRO;
+    await u.click(screen.getByRole('button', { name: /pegar otro enlace/ }));
+    await screen.findByText('CDS-OTRA00');
+
+    await u.click(botonReprogramar());
+    await u.click(await screen.findByRole('button', { name: /lunes, 9 de noviembre/ }));
+    await screen.findByRole('button', { name: '9:30 a. m.' });
+
+    // Misma sede, mismos servicios y mismo rango: las claves de caché no
+    // distinguen CUÁL cita se excluye, así que sin limpiarlas react-query
+    // habría servido (staleTime de 30 s) los datos calculados sin contar la
+    // cita anterior — el tramo de aquella saldría libre sin estarlo y el
+    // propio de esta saldría ocupado.
+    expect(llamadasA('GET', '/publico/mi-reserva/calendario').length).toBeGreaterThan(calendariosDeA);
+    expect(llamadasA('GET', '/publico/mi-reserva/disponibilidad').length).toBeGreaterThan(rejillasDeA);
+  });
+
   it('reprogramar no se confunde con pegar otro enlace: la pantalla no se reinicia', async () => {
     const u = usuario();
     montar();
