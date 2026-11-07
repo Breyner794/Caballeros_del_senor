@@ -91,8 +91,16 @@ export const crearUsuarioSchema = z
     password: passwordSchema,
     rol: z.enum(ROLES),
     activo: z.boolean().default(true),
-    /** Sede principal. Obligatoria para barbero y recepcionista. */
-    sedeId: idSchema.optional(),
+    /**
+     * Sede principal. Obligatoria para barbero y recepcionista.
+     *
+     * Admite `null` además de ausente: el formulario del panel manda
+     * `sedeId: null` explícito cuando el rol no necesita sede, y con un
+     * `.optional()` a secas eso era un 422 ("Expected string, received null")
+     * que impedía crear administradores y contadores. `actualizarUsuarioSchema`
+     * ya lo contemplaba, de ahí que editar funcionara y crear no.
+     */
+    sedeId: idSchema.nullable().optional(),
     /** Sedes adicionales donde puede cubrir turnos. */
     sedesPermitidas: z.array(idSchema).max(20).default([]),
     alias: textoOpcional(60),
