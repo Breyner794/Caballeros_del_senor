@@ -31,10 +31,15 @@ RUN pnpm --filter @cds/shared build \
   && pnpm --filter @cds/api exec nest build
 
 # Se poda a dependencias de producción para no arrastrar TypeScript ni la CLI.
+# `prisma.config.ts` no necesita un `cp` propio: `pnpm deploy` ya copia los
+# archivos del paquete y ese es uno de ellos. Lo que garantiza que la CLI
+# encuentre el esquema es el `--schema` del CMD, no esa config; y
+# DATABASE_URL la toma del entorno del contenedor, que es de donde debe
+# venir en producción (el .env que el config intenta leer no existe aquí,
+# y Prisma continúa sin él).
 RUN pnpm --filter @cds/api --prod deploy /salida \
   && cp -r apps/api/dist /salida/dist \
-  && cp -r apps/api/prisma /salida/prisma \
-  && cp apps/api/prisma.config.ts /salida/prisma.config.ts
+  && cp -r apps/api/prisma /salida/prisma
 
 # -------------------------------------------------------------------- runtime
 FROM base AS runtime
@@ -55,4 +60,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 
 # Las migraciones se aplican al arrancar: un despliegue nuevo queda listo sin
 # pasos manuales. `migrate deploy` solo aplica lo pendiente y nunca borra datos.
-CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy && node dist/main.js"]
+#
+# Para que esto funcione, `prisma` tiene que estar en `dependencies` y no en
+# `devDependencies`: `pnpm --prod deploy` poda las de desarrollo y la CLI
+# desaparecería de la imagen. El síntoma es un contenedor reiniciando en
+# bucle con "sh: node_modules/.bin/prisma: not found".
+CMD ["sh", "-c", "node_modules/.bin/prisma migrate deploy --schema=prisma/schema.prisma && node dist/main.js"]

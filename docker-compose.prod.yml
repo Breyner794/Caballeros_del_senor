@@ -1,0 +1,152 @@
+# =============================================================================
+#  Despliegue de producción (Dokploy, tipo "Compose")
+#
+#  Cinco servicios en una red privada. Solo api, panel y booking se asoman al
+#  proxy de Dokploy; Postgres y Redis no publican ningún puerto y por tanto no
+#  son alcanzables desde Internet.
+#
+#  Las variables NO viven en un archivo de este repositorio: se pegan en la
+#  pestaña Environment del proyecto en Dokploy, que las escribe en un .env
+#  junto a este compose. La plantilla está en .env.produccion.example.
+#
+#  Dominios a configurar en Dokploy (pestaña Domains):
+#    api      → api.tudominio.com      puerto 3001
+#    panel    → panel.tudominio.com    puerto 8080
+#    booking  → tudominio.com          puerto 8080
+# =============================================================================
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: ${TZ:-America/Bogota}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    # Sin `ports`. El 5433 del compose de desarrollo es un puente hacia tu
+    # máquina; en el VPS dejaría la base de datos escuchando en Internet.
+    # Para inspeccionarla desde tu equipo usa un túnel SSH, no un puerto
+    # abierto: ssh -L 5433:localhost:5432 usuario@vps
+    networks:
+      - interna
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${REDIS_PASSWORD}"]
+    volumes:
+      - redisdata:/data
+    networks:
+      - interna
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a ${REDIS_PASSWORD} ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      API_PORT: 3001
+      API_PREFIX: ${API_PREFIX:-api/v1}
+
+      # Las URL se arman aquí a propósito: `postgres` y `redis` son los nombres
+      # de los servicios de arriba, y el DNS interno de la red los resuelve.
+      # Los puertos son los nativos de cada imagen (5432 y 6379), no los 5433 y
+      # 6380 del compose de desarrollo, que solo existían como puente al host.
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+
+      # Lista blanca de CORS. Tienen que ser los dominios exactos desde los que
+      # el navegador carga cada frontend: con esquema https, sin barra final.
+      PANEL_ORIGIN: ${PANEL_ORIGIN}
+      BOOKING_ORIGIN: ${BOOKING_ORIGIN}
+
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET}
+      JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_REFRESH_TTL: ${JWT_REFRESH_TTL:-7d}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+
+      TZ: ${TZ:-America/Bogota}
+      BUSINESS_TIMEZONE: ${BUSINESS_TIMEZONE:-America/Bogota}
+
+      BREVO_API_KEY: ${BREVO_API_KEY}
+      BREVO_SENDER_EMAIL: ${BREVO_SENDER_EMAIL}
+      BREVO_SENDER_NAME: ${BREVO_SENDER_NAME}
+
+      WHATSAPP_PHONE_NUMBER_ID: ${WHATSAPP_PHONE_NUMBER_ID}
+      WHATSAPP_ACCESS_TOKEN: ${WHATSAPP_ACCESS_TOKEN}
+      WHATSAPP_VERIFY_TOKEN: ${WHATSAPP_VERIFY_TOKEN}
+      WHATSAPP_APP_SECRET: ${WHATSAPP_APP_SECRET}
+
+      # Obligatoria en producción: la API no arranca sin ella.
+      TURNSTILE_SECRET_KEY: ${TURNSTILE_SECRET_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    expose:
+      - "3001"
+    networks:
+      - interna
+      - dokploy-network
+
+  panel:
+    build:
+      context: .
+      dockerfile: apps/panel/Dockerfile
+      # Build args, no `environment`: Vite incrusta estos valores en el bundle
+      # al compilar. Cambiarlos exige un Rebuild, no un simple reinicio.
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+    restart: unless-stopped
+    expose:
+      - "8080"
+    networks:
+      - dokploy-network
+
+  booking:
+    build:
+      context: .
+      dockerfile: apps/booking/Dockerfile
+      args:
+        VITE_API_URL: ${VITE_API_URL}
+        # La site key de Turnstile es pública: acaba dentro del JavaScript que
+        # descarga cualquier visitante, y así tiene que ser. La que nunca sale
+        # del servidor es TURNSTILE_SECRET_KEY, arriba en la API.
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY}
+    restart: unless-stopped
+    expose:
+      - "8080"
+    networks:
+      - dokploy-network
+
+volumes:
+  pgdata:
+  redisdata:
+
+networks:
+  # Red privada del proyecto: por aquí hablan la API, Postgres y Redis.
+  interna:
+
+  # Red del proxy de Dokploy. Tiene que existir ya en el VPS (la crea Dokploy
+  # al instalarse). Sin estar en ella, Traefik no puede enrutar los dominios
+  # hacia estos contenedores. Si en tu instalación se llama distinto, cambia
+  # el nombre en los tres servicios y aquí.
+  dokploy-network:
+    external: true

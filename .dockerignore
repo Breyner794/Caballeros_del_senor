@@ -1,0 +1,46 @@
+# Contexto de build. Sin esto, `COPY . .` enviaría al daemon cientos de MB de
+# node_modules y, peor, los .env con los secretos reales.
+
+node_modules
+**/node_modules
+
+# Salidas de compilación: se regeneran dentro de la imagen. Copiarlas arrastra
+# artefactos de Windows a una imagen Alpine.
+dist
+**/dist
+**/*.tsbuildinfo
+
+# Secretos. Nunca entran en una imagen: las variables se inyectan al desplegar.
+.env
+.env.*
+!.env.example
+!.env.produccion.example
+
+.git
+.github
+.gitignore
+.gitattributes
+
+# Herramientas y documentación que no participan en el build.
+.claude
+.agents
+.superpowers
+graphify-out
+docs
+skills-lock.json
+README.md
+CLAUDE.md
+
+# Configuración de linters: no participa en el build.
+eslint.config.mjs
+.prettierrc
+
+# Las pruebas SÍ entran en el contexto, aunque parezca contradictorio.
+# `pnpm build` de los frontends ejecuta `tsc -b`, y su tsconfig.app.json incluye
+# tanto `src` como `test`. Al excluir test/ desaparecía el setup que registra
+# los matchers de jest-dom y el typecheck fallaba con cientos de TS2339 sobre
+# los .spec.tsx, que sí viven en src/. No afecta a la imagen final: de la etapa
+# de build solo se copia dist/.
+
+coverage
+*.log
