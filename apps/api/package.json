@@ -7,7 +7,7 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.test.json",
-    "lint": "eslint \"src/**/*.ts\"",
+    "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integracion": "vitest run --config vitest.integracion.config.ts",

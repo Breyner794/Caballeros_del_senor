@@ -34,14 +34,40 @@ pnpm dev:booking  # solo la web pública de reservas
 Todos con la contraseña `Barberia2026!`, y el panel obliga a cambiarla en el
 primer acceso.
 
-| Correo | Rol |
-| --- | --- |
-| admin@caballerosdelsenor.com | Administrador |
-| recepcion@caballerosdelsenor.com | Recepcionista |
-| andres@caballerosdelsenor.com | Barbero (Centro) |
-| camilo@caballerosdelsenor.com | Barbero (Norte, slot propio de 20 min) |
-| jeison@caballerosdelsenor.com | Barbero (Sur) |
-| contador@caballerosdelsenor.com | Contador |
+| Correo                           | Rol                                    |
+| -------------------------------- | -------------------------------------- |
+| admin@caballerosdelsenor.com     | Administrador                          |
+| recepcion@caballerosdelsenor.com | Recepcionista                          |
+| andres@caballerosdelsenor.com    | Barbero (Centro)                       |
+| camilo@caballerosdelsenor.com    | Barbero (Norte, slot propio de 20 min) |
+| jeison@caballerosdelsenor.com    | Barbero (Sur)                          |
+| contador@caballerosdelsenor.com  | Contador                               |
+
+## Verificación
+
+Cuatro comandos, en este orden. Son los mismos que corre CI
+(`.github/workflows/ci.yml`) en cada push y cada pull request:
+
+```bash
+pnpm -r typecheck     # tipos de api, panel, booking y shared
+pnpm lint             # ESLint 10, configuración plana única en eslint.config.mjs
+pnpm -r test          # 477 pruebas de la API + 131 de la web pública
+pnpm --filter @cds/api test:integracion   # 68 contra Postgres de verdad
+```
+
+El `typecheck` de la API resuelve los tipos de `@cds/shared` en su `dist`, así
+que si vienes de un clon limpio hace falta `pnpm --filter @cds/shared build`
+antes (o `pnpm dev`, que ya lo construye).
+
+Las de integración necesitan Postgres levantado (`pnpm db:up`) y la
+`DATABASE_URL` del `.env`: la suite deriva de ella un nombre con sufijo
+`_test`, crea esa base si falta y le aplica las migraciones. Nunca toca la de
+desarrollo. Para apuntar a otro servidor, `DATABASE_URL_TEST` tiene
+preferencia.
+
+`pnpm lint` revisa el monorepo completo de una pasada; para una parte,
+`pnpm --filter @cds/panel lint` o `pnpm exec eslint apps/api/src`. `pnpm
+lint:fix` aplica lo autocorregible.
 
 ## Estructura
 
@@ -157,12 +183,12 @@ openssl rand -base64 48
 (`DATABASE_URL`, `REDIS_URL`, los dos secretos JWT, `ENCRYPTION_KEY`,
 `BREVO_*`), la web pública de reservas necesita estas cuatro:
 
-| Variable | Dónde | Si falta |
-| --- | --- | --- |
-| `TURNSTILE_SECRET_KEY` | API | En producción la API **no arranca** (y así debe ser: sin ella el canal público quedaría sin captcha). Fuera de producción el canal levanta sin captcha y lo avisa una vez, con nivel `error`, al arrancar. |
-| `BOOKING_ORIGIN` | API | El CORS rechaza al navegador del cliente y el enlace de gestión del correo se construye contra `http://localhost:5174`. Es el origen público de la web (`https://reservas.tudominio.com`). |
-| `VITE_API_URL` | Web (en **build**) | Cae al valor de desarrollo (`http://localhost:3001/api/v1`) y la web no carga nada. Es una variable de compilación: cambiarla exige reconstruir, no reiniciar. **Dejarla creada pero vacía cuenta como no configurada.** |
-| `VITE_TURNSTILE_SITE_KEY` | Web (en **build**) | El widget del captcha no se pinta y ninguna reserva se puede enviar, porque la API exige el token. |
+| Variable                  | Dónde              | Si falta                                                                                                                                                                                                                 |
+| ------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `TURNSTILE_SECRET_KEY`    | API                | En producción la API **no arranca** (y así debe ser: sin ella el canal público quedaría sin captcha). Fuera de producción el canal levanta sin captcha y lo avisa una vez, con nivel `error`, al arrancar.               |
+| `BOOKING_ORIGIN`          | API                | El CORS rechaza al navegador del cliente y el enlace de gestión del correo se construye contra `http://localhost:5174`. Es el origen público de la web (`https://reservas.tudominio.com`).                               |
+| `VITE_API_URL`            | Web (en **build**) | Cae al valor de desarrollo (`http://localhost:3001/api/v1`) y la web no carga nada. Es una variable de compilación: cambiarla exige reconstruir, no reiniciar. **Dejarla creada pero vacía cuenta como no configurada.** |
+| `VITE_TURNSTILE_SITE_KEY` | Web (en **build**) | El widget del captcha no se pinta y ninguna reserva se puede enviar, porque la API exige el token.                                                                                                                       |
 
 **2. Migraciones y siembra.**
 
@@ -187,7 +213,7 @@ cita. El único rastro es una línea `error` en el log de la API.
 > se degrada en silencio: sigue funcionando, cada vez más lenta. En producción
 > se usa `prisma migrate deploy`, que no propone diffs.
 
-**3. El *fallback* de SPA del host estático.** `/cita#<token>` es una ruta de
+**3. El _fallback_ de SPA del host estático.** `/cita#<token>` es una ruta de
 cliente, no un archivo: el servidor tiene que reescribir cualquier ruta
 desconocida a `index.html`. **En un host estático sin esa reescritura, abrir el
 enlace de la cita devuelve 404** — y ese enlace es la única llave de la cita y

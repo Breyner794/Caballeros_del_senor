@@ -55,6 +55,7 @@ async function asegurarServidor(url: string): Promise<void> {
         '',
         `Detalle: ${primeraLinea(error)}`,
       ].join('\n'),
+      { cause: error },
     );
   } finally {
     await mantenimiento.$disconnect();

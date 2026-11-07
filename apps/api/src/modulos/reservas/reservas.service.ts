@@ -568,7 +568,7 @@ export class ReservasService {
   }
 
   /** El barbero marca que ya está atendiendo: pinta la fila en el panel. */
-  async iniciar(id: string, actor: UsuarioAutenticado) {
+  async iniciar(id: string, _actor: UsuarioAutenticado) {
     const antes = await this.obtener(id);
     if (!puedeTransicionar(antes.estado as EstadoReserva, 'EN_CURSO')) {
       throw new ErrorNegocio(CODIGOS_ERROR.ESTADO_RESERVA_INVALIDO, 409, {
@@ -624,6 +624,13 @@ export class ReservasService {
    * que después nadie sabe reconstruir.
    */
   async completar(id: string, datos: CompletarReservaDto, actor: UsuarioAutenticado) {
+    // Esta lectura no se usa en el cuerpo del método: el resumen de
+    // auditoría de `completar` no formatea ninguna fecha. La fija la prueba
+    // «usa la zona horaria del negocio para los textos de auditoría», así
+    // que se conserva tal cual y queda anotada como hallazgo: decidir entre
+    // borrar la lectura (y la prueba) o usar la zona en el texto es un cambio
+    // de comportamiento que no pertenece a la rama que monta el linter.
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const zona = await this.configuracion.zonaHoraria();
     const reserva = await this.obtener(id);
 

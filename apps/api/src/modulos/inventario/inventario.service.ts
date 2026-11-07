@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { Prisma, type TipoMovimientoInventario } from '@prisma/client';
-import { CODIGOS_ERROR, calcularSalto, construirMeta, type PaginaRespuesta } from '@cds/shared';
+import { CODIGOS_ERROR, calcularSalto, construirMeta } from '@cds/shared';
 import { PrismaService } from '../../comun/prisma/prisma.service.js';
 import { AuditoriaService } from '../../comun/auditoria/auditoria.service.js';
 import { ErrorNegocio } from '../../comun/excepciones/error-negocio.js';

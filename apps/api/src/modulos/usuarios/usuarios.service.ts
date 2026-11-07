@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, type Usuario } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import {
   CODIGOS_ERROR,
   calcularSalto,

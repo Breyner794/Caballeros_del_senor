@@ -1,0 +1,94 @@
+name: CI
+
+# Cada push y cada pull request. El repositorio todavía no tiene remoto
+# configurado (`git remote -v` sale vacío), así que este workflow empieza a
+# correr en cuanto se suba a GitHub; hasta entonces documenta exactamente la
+# secuencia de verificación que hoy se hace a mano.
+on:
+  push:
+  pull_request:
+
+# Un push nuevo sobre la misma rama cancela la corrida anterior.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    name: typecheck, lint y pruebas
+    runs-on: ubuntu-latest
+
+    env:
+      # La zona horaria del negocio. El dominio entero (cronograma, huecos,
+      # cierres) razona en America/Bogota y las pruebas comparan textos de
+      # fecha ya formateados; con la UTC del runner esas comparaciones
+      # cambiarían de resultado sin que nada del código esté mal.
+      TZ: America/Bogota
+      # La suite de integración prefiere esta variable sobre DATABASE_URL
+      # (ver apps/api/test/integracion/soporte/conexion.ts). Apunta al servicio
+      # de Postgres de abajo; la base `caballeros_test` todavía no existe y la
+      # crea el propio arranque de la suite.
+      DATABASE_URL_TEST: postgresql://cds:cds_ci_password@localhost:5432/caballeros_test?schema=public
+
+    services:
+      postgres:
+        # La misma imagen que docker-compose.yml usa en desarrollo. Trae
+        # pg_trgm, unaccent y btree_gist, que la migración en SQL crudo
+        # `reglas_negocio_sql` crea con CREATE EXTENSION; el usuario que define
+        # POSTGRES_USER es superusuario, así que puede crearlas.
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: cds
+          POSTGRES_PASSWORD: cds_ci_password
+          POSTGRES_DB: caballeros
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm primero: setup-node necesita que el gestor exista para poder
+      # cachear su store. La versión sale del campo `packageManager` de la raíz.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Instalar dependencias
+        run: pnpm install --frozen-lockfile
+
+      # El cliente de Prisma es código generado: sin él no hay tipos que
+      # comprobar ni nada que importar en las pruebas.
+      - name: Generar el cliente de Prisma
+        run: pnpm --filter @cds/api prisma:generate
+
+      # `@cds/shared` se consume por su `exports` (dist), no por sus fuentes:
+      # el typecheck de la API y de los dos frontales resuelve sus tipos en
+      # dist/cjs/index.d.ts. `pnpm -r typecheck` no lo construye por su cuenta.
+      - name: Construir @cds/shared
+        run: pnpm --filter @cds/shared build
+
+      - name: Comprobación de tipos
+        run: pnpm -r typecheck
+
+      - name: Linter
+        run: pnpm lint
+
+      - name: Pruebas unitarias
+        run: pnpm -r test
+
+      # Postgres de verdad: la restricción de exclusión anti-solape y los CHECK
+      # de coherencia solo existen en el motor. El `globalSetup` de la suite
+      # (apps/api/test/integracion/soporte/preparar-base.ts) crea la base
+      # `caballeros_test` y aplica las migraciones él mismo con
+      # `prisma migrate deploy`, de modo que aquí no hace falta un paso previo
+      # de `prisma:deploy`.
+      - name: Pruebas de integración de la API
+        run: pnpm --filter @cds/api test:integracion
