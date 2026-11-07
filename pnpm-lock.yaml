@@ -317,9 +317,6 @@ importers:
       react-router-dom:
         specifier: ^7.1.5
         version: 7.18.4(react-dom@19.3.0(react@19.3.0))(react@19.3.0)
-      shadcn:
-        specifier: ^4.21.4
-        version: 4.21.4(supports-color@8.1.1)
       tailwind-merge:
         specifier: ^3.0.1
         version: 3.7.0
@@ -354,6 +351,9 @@ importers:
       jsdom:
         specifier: ^26.0.0
         version: 26.1.0(supports-color@8.1.1)
+      shadcn:
+        specifier: ^4.21.4
+        version: 4.21.4(supports-color@8.1.1)
       tailwindcss:
         specifier: ^4.0.3
         version: 4.3.3
