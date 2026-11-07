@@ -46,6 +46,17 @@ export function plegar(linea: string): string {
   return partes.join('\r\n ');
 }
 
+/**
+ * RFC 5545 §3.8.1.11. Sin esta propiedad el calendario del cliente trata el
+ * evento como `CONFIRMED`, así que una cita que nació `PENDIENTE` (el panel con
+ * `requiereConfirmacion` activo) aparecería confirmada en su teléfono sin que
+ * nadie la haya confirmado. `TENTATIVE` es lo que de verdad es.
+ */
+function estadoIcs(estado: ReservaPublica['estado']): string {
+  if (estado === 'CANCELADA') return 'CANCELLED';
+  return estado === 'CONFIRMADA' ? 'CONFIRMED' : 'TENTATIVE';
+}
+
 export function generarIcs(reserva: ReservaPublica): string {
   const lugar = [reserva.sede.nombre, reserva.sede.direccion].filter(Boolean).join(', ');
   const descripcion = [
@@ -65,6 +76,7 @@ export function generarIcs(reserva: ReservaPublica): string {
     `DTSTAMP:${enUtc(new Date().toISOString())}`,
     `DTSTART:${enUtc(reserva.inicioEn)}`,
     `DTEND:${enUtc(reserva.finEn)}`,
+    `STATUS:${estadoIcs(reserva.estado)}`,
     `SUMMARY:${escapar('Cita en Caballeros del Señor')}`,
     `LOCATION:${escapar(lugar)}`,
     `DESCRIPTION:${escapar(descripcion)}`,

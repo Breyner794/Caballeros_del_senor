@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ETIQUETAS_ESTADO, type EstadoReserva } from '@cds/shared';
 import { Boton, claseBoton } from '@/componentes/ui/boton';
 import { descargarIcs } from '@/lib/ics';
 import { etiquetaFechaHora, formatearPrecio } from '@/lib/formato';
@@ -17,9 +18,36 @@ export function enlaceDeGestion(tokenGestion: string): string {
 
 type EstadoCopia = 'inicial' | 'copiado' | 'fallo';
 
+/**
+ * Qué se le dice al cliente según el estado REAL de la cita que devolvió la API.
+ *
+ * El canal público nunca confirma una cita: pasa `confirmar: false` al dominio
+ * a propósito, para que la aprobación siga siendo de recepción. Si el dueño
+ * activa `requiereConfirmacion` en el panel —un interruptor, no un despliegue—,
+ * el dominio crea la cita `PENDIENTE`, y una pantalla que dijera «confirmada»
+ * con texto fijo estaría mintiéndole al cliente. El tono es el del correo
+ * («Recibimos tu cita»), que sí está redactado para los dos casos.
+ */
+function textoDelEstado(estado: EstadoReserva): { titulo: string; detalle: string | null } {
+  switch (estado) {
+    case 'CONFIRMADA':
+      return { titulo: 'Tu cita está confirmada', detalle: null };
+    case 'PENDIENTE':
+      return {
+        titulo: 'Recibimos tu cita',
+        detalle: 'Te avisamos en cuanto la barbería la confirme.',
+      };
+    default:
+      // Ningún otro estado nace al reservar; si alguno llegara, se dice el
+      // estado tal cual en vez de inventarle una frase tranquilizadora.
+      return { titulo: `Tu cita quedó registrada`, detalle: `Estado: ${ETIQUETAS_ESTADO[estado]}.` };
+  }
+}
+
 export function PasoListo({ reserva, zonaHoraria, moneda }: Props) {
   const [copia, setCopia] = useState<EstadoCopia>('inicial');
   const enlace = enlaceDeGestion(reserva.tokenGestion);
+  const { titulo, detalle } = textoDelEstado(reserva.estado);
 
   async function copiar() {
     try {
@@ -34,8 +62,9 @@ export function PasoListo({ reserva, zonaHoraria, moneda }: Props) {
   return (
     <div className="space-y-8">
       <section aria-label="Código de tu cita" className="space-y-2 text-center">
-        <p className="text-muted-foreground">Tu cita está confirmada</p>
+        <p className="text-muted-foreground">{titulo}</p>
         <p className="font-mono text-4xl font-bold tracking-wider">{reserva.codigo}</p>
+        {detalle ? <p className="text-muted-foreground text-sm">{detalle}</p> : null}
       </section>
 
       <section aria-label="Detalle de tu cita" className="bg-muted/50 space-y-1 rounded-xl p-4">

@@ -495,6 +495,36 @@ describe('pantalla final', () => {
     expect(screen.queryByRole('button', { name: /continuar/i })).not.toBeInTheDocument();
   });
 
+  it('una cita PENDIENTE no se anuncia como confirmada', async () => {
+    // El canal público nunca confirma una cita (pasa `confirmar: false` al
+    // dominio): con `requiereConfirmacion` activo en el panel, el dominio la
+    // crea PENDIENTE. Decir «confirmada» con texto fijo sería mentirle al
+    // cliente, y el interruptor está a un clic en el panel.
+    const u = usuario();
+    montar();
+    await hastaDatos(u);
+    await rellenarDatos(u);
+    await u.click(confirmar());
+
+    await screen.findByText('CDS-7F3K2M');
+    expect(screen.getByText('Recibimos tu cita')).toBeInTheDocument();
+    expect(screen.getByText(/en cuanto la barbería la confirme/i)).toBeInTheDocument();
+    expect(screen.queryByText(/está confirmada/i)).not.toBeInTheDocument();
+  });
+
+  it('una cita CONFIRMADA sí se anuncia como confirmada', async () => {
+    const u = usuario();
+    alReservar = async () => ({ ...RESERVA, estado: 'CONFIRMADA' });
+    montar();
+    await hastaDatos(u);
+    await rellenarDatos(u);
+    await u.click(confirmar());
+
+    await screen.findByText('CDS-7F3K2M');
+    expect(screen.getByText('Tu cita está confirmada')).toBeInTheDocument();
+    expect(screen.queryByText(/la barbería la confirme/i)).not.toBeInTheDocument();
+  });
+
   it('desde la pantalla final, atrás no vuelve al formulario ni crea otra cita', async () => {
     const u = usuario();
     montar();

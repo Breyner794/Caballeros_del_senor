@@ -44,6 +44,19 @@ describe('generarIcs', () => {
     expect(ics).toContain('LOCATION:Sede Centro\\, Calle 10 #5-20\\, con coma');
   });
 
+  it('una cita PENDIENTE no entra al calendario como confirmada', () => {
+    // Sin `STATUS`, el calendario del cliente la trata como CONFIRMED: una
+    // cita que la barbería todavía no ha confirmado aparecería confirmada en
+    // su teléfono.
+    expect(ics).toContain('STATUS:TENTATIVE');
+    expect(ics).not.toContain('STATUS:CONFIRMED');
+  });
+
+  it('una cita CONFIRMADA sí sale confirmada, y una cancelada como cancelada', () => {
+    expect(generarIcs({ ...reserva, estado: 'CONFIRMADA' })).toContain('STATUS:CONFIRMED');
+    expect(generarIcs({ ...reserva, estado: 'CANCELADA' })).toContain('STATUS:CANCELLED');
+  });
+
   it('lista los servicios en la descripción', () => {
     expect(ics).toContain('Corte');
     expect(ics).toContain('CDS-7F3K2M');
