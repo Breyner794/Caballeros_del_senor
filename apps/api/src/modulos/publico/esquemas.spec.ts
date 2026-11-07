@@ -7,6 +7,7 @@ import type {
   ServicioPublico,
 } from '@cds/shared';
 import {
+  MAX_TOKEN_TURNSTILE,
   cancelarReservaPublicaSchema,
   clienteNuevoEnReservaSchema,
   consultarCalendarioPublicoSchema,
@@ -54,6 +55,24 @@ describe('crearReservaPublicaSchema', () => {
 
   it('exige el token de Turnstile', () => {
     expect(crearReservaPublicaSchema.safeParse({ ...base, tokenTurnstile: undefined }).success).toBe(false);
+  });
+
+  it('la nota del cliente tiene tope de 500 caracteres', () => {
+    // Es el único cuerpo que acepta internet: sin tope, un bot escribe un
+    // megabyte de texto en cada cita y la base lo guarda.
+    expect(crearReservaPublicaSchema.safeParse({ ...base, notaCliente: 'a'.repeat(500) }).success).toBe(true);
+    expect(crearReservaPublicaSchema.safeParse({ ...base, notaCliente: 'a'.repeat(501) }).success).toBe(false);
+  });
+
+  it('el token de Turnstile tiene tope de MAX_TOKEN_TURNSTILE', () => {
+    // 2048 es el largo que documenta Cloudflare; más que eso no es un token.
+    expect(
+      crearReservaPublicaSchema.safeParse({ ...base, tokenTurnstile: 't'.repeat(MAX_TOKEN_TURNSTILE) }).success,
+    ).toBe(true);
+    expect(
+      crearReservaPublicaSchema.safeParse({ ...base, tokenTurnstile: 't'.repeat(MAX_TOKEN_TURNSTILE + 1) })
+        .success,
+    ).toBe(false);
   });
 
   it('acepta el correo como opcional y lo omite si no viene', () => {

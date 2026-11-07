@@ -170,6 +170,17 @@ describe('aHuecoPublico', () => {
     expect(salida).toEqual({ inicioEn: '2026-03-11T14:30:00.000Z', hora: '09:30', disponible: false });
   });
 
+  it('un motivo que nadie ha visto nunca también se colapsa', () => {
+    // Esta es LA prueba de la lista blanca (decisión R9): con una lista negra
+    // de motivos ocultos, un motivo nuevo en `HuecoDisponible` se filtraría al
+    // cliente por omisión hasta que alguien se acordara de taparlo. Las demás
+    // pruebas de este bloque pasarían igual con una lista negra; esta no.
+    const salida = aHuecoPublico(hueco({ motivo: 'NUEVO_MOTIVO' }));
+    expect(salida.motivo).toBeUndefined();
+    expect('motivo' in salida).toBe(false);
+    expect(JSON.stringify(salida)).not.toContain('NUEVO_MOTIVO');
+  });
+
   it('un hueco libre sale con claves exactas y sin motivo', () => {
     expect(ordenadas(aHuecoPublico(hueco({ disponible: true })))).toEqual([
       'disponible', 'hora', 'inicioEn',
